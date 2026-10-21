@@ -1,25 +1,18 @@
-import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
 import { StaffDashboard } from '@/components/staff/StaffDashboard';
-import type { StaffRole } from '@/types/database.types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function StaffPage() {
-  const [{ userId, sessionClaims }, supabase] = await Promise.all([
-    auth().catch(() => ({ userId: null, sessionClaims: null })),
-    createSupabaseServerClient(),
-  ]);
+  const supabase = await createSupabaseServerClient();
+  const { userId, role: currentStaffRole } =
+    await syncClerkStaffToSupabase(supabase);
 
-  const rawMetadata = (
-    sessionClaims as Record<string, unknown> | null | undefined
-  )?.metadata as { role?: StaffRole } | undefined;
-  const currentStaffRole: StaffRole =
-    rawMetadata?.role === 'admin' ||
-    rawMetadata?.role === 'kitchen' ||
-    rawMetadata?.role === 'staff'
-      ? rawMetadata.role
-      : 'staff';
+  if (currentStaffRole === 'kitchen') {
+    redirect('/kitchen');
+  }
 
   const [
     zonesRes,

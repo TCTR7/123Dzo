@@ -5,13 +5,13 @@ import {
 } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/database.types';
-import {
-  instantDemoFetch,
-  isPlaceholderSupabaseUrl,
-} from './demo-fallback';
 
-const FALLBACK_SUPABASE_URL = 'https://placeholder-project.supabase.co';
-const FALLBACK_SUPABASE_KEY = 'placeholder-anon-key';
+function normalizeSupabaseUrl(rawUrl: string | undefined): string {
+  if (!rawUrl) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
+  }
+  return rawUrl.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
+}
 
 /**
  * Khởi tạo Supabase Server Client tích hợp kiểu Database cho Next.js 15 App Router
@@ -21,16 +21,18 @@ export async function createSupabaseServerClient(): Promise<
   SupabaseClient<Database>
 > {
   const cookieStore = await cookies();
-  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const rawKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = normalizeSupabaseUrl(
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const isPlaceholder = isPlaceholderSupabaseUrl(rawUrl);
-  const supabaseUrl = !isPlaceholder && rawUrl ? rawUrl : FALLBACK_SUPABASE_URL;
-  const supabaseAnonKey =
-    rawKey && rawKey.length > 0 ? rawKey : FALLBACK_SUPABASE_KEY;
+  if (!supabaseAnonKey) {
+    throw new Error(
+      'Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
+    );
+  }
 
   return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
-    global: isPlaceholder ? { fetch: instantDemoFetch } : undefined,
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -60,27 +62,25 @@ export async function createSupabaseServerClient(): Promise<
  * hoặc gửi Web Push Notification (/api/push/notify).
  */
 export function createSupabaseServiceRoleClient(): SupabaseClient<Database> {
-  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const rawKey =
+  const supabaseUrl = normalizeSupabaseUrl(
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
+  const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const isPlaceholder = isPlaceholderSupabaseUrl(rawUrl);
-  const supabaseUrl = !isPlaceholder && rawUrl ? rawUrl : FALLBACK_SUPABASE_URL;
-  const serviceRoleKey =
-    rawKey && rawKey.length > 0 ? rawKey : FALLBACK_SUPABASE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error(
+      'Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
+    );
+  }
 
-  return createSupabaseJsClient<Database>(
-    supabaseUrl,
-    serviceRoleKey,
-    {
-      global: isPlaceholder ? { fetch: instantDemoFetch } : undefined,
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  ) as unknown as SupabaseClient<Database>;
+  return createSupabaseJsClient<Database>(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }) as unknown as SupabaseClient<Database>;
 }
 
 export {

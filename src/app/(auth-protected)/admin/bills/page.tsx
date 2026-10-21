@@ -1,14 +1,12 @@
-import { auth } from '@clerk/nextjs/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
 import { BillsManager } from '@/components/admin/BillsManager';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminBillsPage() {
-  const [{ userId }, supabase] = await Promise.all([
-    auth().catch(() => ({ userId: null })),
-    createSupabaseServerClient(),
-  ]);
+  const supabase = await createSupabaseServerClient();
+  const { userId } = await syncClerkStaffToSupabase(supabase);
 
   const [sessionsRes, orderItemsRes, tablesRes, menuRes, staffRes] =
     await Promise.all([

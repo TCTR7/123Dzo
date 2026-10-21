@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
+import { UserButton } from '@clerk/nextjs';
 import {
   ChefHat,
   Flame,
@@ -13,6 +15,8 @@ import {
   Search,
   AlertTriangle,
   X,
+  BarChart3,
+  LayoutGrid,
 } from 'lucide-react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
@@ -23,6 +27,7 @@ import {
 import type {
   MenuItemRow,
   OrderItemRow,
+  StaffRole,
   TableRow,
   TableSessionRow,
 } from '@/types/database.types';
@@ -32,6 +37,7 @@ interface KitchenKdsBoardProps {
   initialActiveSessions: TableSessionRow[];
   tables: TableRow[];
   initialMenuItems: MenuItemRow[];
+  currentStaffRole?: StaffRole;
 }
 
 interface BatchGroup {
@@ -62,6 +68,7 @@ export function KitchenKdsBoard({
   initialActiveSessions,
   tables,
   initialMenuItems,
+  currentStaffRole = 'kitchen',
 }: KitchenKdsBoardProps) {
   const supabase = createSupabaseBrowserClient();
 
@@ -530,10 +537,13 @@ export function KitchenKdsBoard({
             <ChefHat className="h-7 w-7" />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-xl font-black text-zinc-100">
                 123Dzô • Màn hình Điều phối Bếp (KDS Tablet)
               </h1>
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-orange-500/15 text-orange-300 border border-orange-500/30">
+                Role: {currentStaffRole}
+              </span>
               <span
                 className={cn(
                   'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border',
@@ -555,7 +565,7 @@ export function KitchenKdsBoard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
             onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
@@ -578,6 +588,29 @@ export function KitchenKdsBoard({
               </span>
             )}
           </button>
+
+          {currentStaffRole === 'admin' && (
+            <>
+              <Link
+                href="/admin"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition-colors"
+              >
+                <BarChart3 className="h-4 w-4 text-amber-400" />
+                Về Quản Trị (/admin)
+              </Link>
+              <Link
+                href="/staff"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-emerald-300 transition-colors"
+              >
+                <LayoutGrid className="h-4 w-4 text-emerald-400" />
+                Phục vụ Bàn (/staff)
+              </Link>
+            </>
+          )}
+
+          <div className="pl-1 flex items-center">
+            <UserButton />
+          </div>
         </div>
       </header>
 

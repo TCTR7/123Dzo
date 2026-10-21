@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import Link from 'next/link';
+import { UserButton } from '@clerk/nextjs';
 import {
   BellRing,
   QrCode,
@@ -18,6 +20,8 @@ import {
   X,
   Clock,
   ExternalLink,
+  BarChart3,
+  ChefHat,
 } from 'lucide-react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
@@ -901,25 +905,53 @@ export function StaffDashboard({
       {/* Top Bar Nhân viên chạy bàn */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <h1 className="text-xl font-bold text-amber-400">
               123Dzô • Phục vụ Chạy bàn (Realtime)
             </h1>
+            <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              Role: {currentStaffRole}
+            </span>
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
             Mở bàn sinh QR động, nhận chuông báo món chín & xử lý chuyển bàn / trả bia thừa.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
-          className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
-        >
-          <Volume2 className="h-4 w-4 text-amber-400" />
-          Kiểm tra chuông Ting-Ting
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
+            className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
+          >
+            <Volume2 className="h-4 w-4 text-amber-400" />
+            Kiểm tra chuông
+          </button>
+
+          {currentStaffRole === 'admin' && (
+            <>
+              <Link
+                href="/admin"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition-colors"
+              >
+                <BarChart3 className="h-4 w-4 text-amber-400" />
+                Về Quản Trị (/admin)
+              </Link>
+              <Link
+                href="/kitchen"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-orange-300 transition-colors"
+              >
+                <ChefHat className="h-4 w-4 text-orange-400" />
+                Bếp KDS (/kitchen)
+              </Link>
+            </>
+          )}
+
+          <div className="pl-1 flex items-center">
+            <UserButton />
+          </div>
+        </div>
       </header>
 
       {errorMessage && (

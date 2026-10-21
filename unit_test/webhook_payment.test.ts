@@ -41,6 +41,13 @@ vi.mock('@/lib/supabase/server', () => ({
           }),
         };
       }
+      if (table === 'menu_items') {
+        return {
+          select: () => ({
+            in: () => Promise.resolve({ data: [], error: null }),
+          }),
+        };
+      }
       return {};
     },
   }),
@@ -112,10 +119,15 @@ describe('Unit Test: Webhook Thanh Toán (/api/webhooks/payment)', () => {
       error: null,
     });
 
-    mockUpdateOrderItems.mockResolvedValueOnce({
-      data: [{ id: 'item-1' }, { id: 'item-2' }],
-      error: null,
-    });
+    mockUpdateOrderItems
+      .mockResolvedValueOnce({
+        data: [{ id: 'item-1', menu_item_id: 'm1', quantity: 1 }, { id: 'item-2', menu_item_id: 'm2', quantity: 2 }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [],
+        error: null,
+      });
 
     const req = new Request('http://localhost:3000/api/webhooks/payment', {
       method: 'POST',
@@ -127,13 +139,13 @@ describe('Unit Test: Webhook Thanh Toán (/api/webhooks/payment)', () => {
     const body = (await res.json()) as {
       success: boolean;
       status: string;
-      queuedItemsCount: number;
+      queuedKitchenCount: number;
     };
 
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.status).toBe('ACTIVE');
-    expect(body.queuedItemsCount).toBe(2);
+    expect(body.queuedKitchenCount).toBe(2);
   });
 
   it('Đảm bảo tính Idempotency: Trả về 200 idempotent=true nếu đơn TAKEAWAY đã ACTIVE trước đó', async () => {

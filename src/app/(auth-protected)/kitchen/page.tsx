@@ -1,10 +1,17 @@
+import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
 import { KitchenKdsBoard } from '@/components/kitchen/KitchenKdsBoard';
 
 export const dynamic = 'force-dynamic';
 
 export default async function KitchenPage() {
   const supabase = await createSupabaseServerClient();
+  const { role: currentStaffRole } = await syncClerkStaffToSupabase(supabase);
+
+  if (currentStaffRole === 'staff') {
+    redirect('/staff');
+  }
 
   const [ordersRes, sessionsRes, tablesRes, menuRes] = await Promise.all([
     supabase
@@ -48,6 +55,7 @@ export default async function KitchenPage() {
       initialActiveSessions={sessionsRes.data ?? []}
       tables={tablesRes.data ?? []}
       initialMenuItems={menuRes.data ?? []}
+      currentStaffRole={currentStaffRole}
     />
   );
 }

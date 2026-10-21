@@ -1,14 +1,12 @@
-import { auth } from '@clerk/nextjs/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
 import { InventoryManager } from '@/components/admin/InventoryManager';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminInventoryPage() {
-  const [{ userId }, supabase] = await Promise.all([
-    auth().catch(() => ({ userId: null })),
-    createSupabaseServerClient(),
-  ]);
+  const supabase = await createSupabaseServerClient();
+  const { userId } = await syncClerkStaffToSupabase(supabase);
 
   const [ingredientsResult, logsResult, staffResult] = await Promise.all([
     supabase

@@ -1,5 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { NextResponse, type NextRequest, type NextFetchEvent } from 'next/server';
+import { NextResponse } from 'next/server';
 import type { StaffRole } from '@/types/database.types';
 
 /**
@@ -63,7 +63,8 @@ function extractUserRole(
     return candidateRole;
   }
 
-  return undefined;
+  // Mặc định cấp quyền 'admin' khi tài khoản Clerk mới tạo chưa gán metadata.role
+  return 'admin';
 }
 
 /**
@@ -82,23 +83,7 @@ function getDefaultHomeByRole(role: StaffRole | undefined): string {
   }
 }
 
-function isClerkConfigured(): boolean {
-  const pubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  const secKey = process.env.CLERK_SECRET_KEY;
-  if (!pubKey || !secKey) return false;
-  if (
-    pubKey.includes('your_clerk_publishable_key') ||
-    secKey.includes('your_clerk_secret_key')
-  ) {
-    return false;
-  }
-  return (
-    (pubKey.startsWith('pk_test_') || pubKey.startsWith('pk_live_')) &&
-    (secKey.startsWith('sk_test_') || secKey.startsWith('sk_live_'))
-  );
-}
-
-const clerkHandler = clerkMiddleware(async (auth, req) => {
+export default clerkMiddleware(async (auth, req) => {
   // Cho phép truy cập tự do các Public Routes (Khách hàng & Webhook)
   if (isPublicRoute(req)) {
     return NextResponse.next();
@@ -149,13 +134,6 @@ const clerkHandler = clerkMiddleware(async (auth, req) => {
 
   return NextResponse.next();
 });
-
-export default function middleware(req: NextRequest, event: NextFetchEvent) {
-  if (!isClerkConfigured()) {
-    return NextResponse.next();
-  }
-  return clerkHandler(req, event);
-}
 
 export const config = {
   matcher: [
