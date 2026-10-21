@@ -1,36 +1,61 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
+# 1. Thư viện cài đặt (Node.js)
 /node_modules
 /.pnp
-.pnp.js
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# 2. Next.js & Build Output
 /.next/
 /out/
-
-# production
 /build
+/dist
+next-env.d.ts
 
-# misc
+# 3. PWA (Serwist / Workbox tự sinh ra khi build)
+/public/sw.js
+/public/sw.js.map
+/public/swe-worker-*.js
+/public/swe-worker-*.js.map
+/public/workbox-*.js
+/public/workbox-*.js.map
+
+# 4. Biến môi trường & Khóa bảo mật (CỰC KỲ QUAN TRỌNG: Clerk, Supabase, PayOS keys)
+.env
+.env*.local
+.env.development
+.env.production
+!.env.example
+
+# 5. Supabase CLI (Nếu chạy local hoặc generate types)
+.branches
+.temp
+supabase/.branches
+supabase/.temp
+
+# 6. Hosting (Vercel / Cloudflare)
+.vercel
+.wrangler
+.open-next
+
+# 7. TypeScript & Linter Cache
+*.tsbuildinfo
+.eslintcache
+
+# 8. Hệ điều hành & IDE (Mac, Windows, VSCode)
 .DS_Store
 *.pem
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
 
-# debug
+# 9. Logs lỗi
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# local env files
-.env*.local
-.env
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+.pnpm-debug.log*
