@@ -13,6 +13,7 @@ import {
   ShoppingBag,
   X,
 } from 'lucide-react';
+import { useAppEvents } from '@/lib/use-app-events';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { formatVND, playNotificationSound, cn } from '@/lib/utils';
 import type {
@@ -89,74 +90,9 @@ export function BillsManager({
   // ==========================================================================
   // LẮNG NGHE REALTIME TABLE_SESSIONS & ORDER_ITEMS (CÓ CLEANUP REMOVECHANNEL)
   // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('admin-bills-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const created = payload.new as TableSessionRow;
-            setSessions((prev) =>
-              prev.some((s) => s.id === created.id)
-                ? prev
-                : [created, ...prev]
-            );
-            if (
-              created.session_type === 'TAKEAWAY' &&
-              created.status === 'PENDING_PAYMENT'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as TableSessionRow;
-            const old = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) =>
-              prev.map((s) => (s.id === updated.id ? updated : s))
-            );
-            if (
-              updated.status === 'REQUEST_BILL' &&
-              old.status !== 'REQUEST_BILL'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const created = payload.new as OrderItemRow;
-            setOrderItems((prev) =>
-              prev.some((i) => i.id === created.id)
-                ? prev
-                : [created, ...prev]
-            );
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as OrderItemRow;
-            setOrderItems((prev) =>
-              prev.map((i) => (i.id === updated.id ? updated : i))
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+  useAppEvents((snapshot) => {
+    setSessions(snapshot.sessions); setOrderItems(snapshot.orders);
+  }, { sound: true });
 
   const requestBillCount = useMemo(
     () => sessions.filter((s) => s.status === 'REQUEST_BILL').length,
@@ -362,67 +298,6 @@ export function BillsManager({
         throw new Error(
           sessionErr?.message ?? 'Không thể xác nhận chuyển khoản đơn mang về'
         );
-      }
-
-      const { data: kitchenItems } = await supabase
-        .from('order_items')
-        .update({
-          status: 'QUEUED',
-          created_at: nowIso,
-        })
-        .eq('session_id', selectedSession.id)
-        .eq('station', 'KITCHEN')
-        .neq('status', 'CANCELLED')
-        .select('*');
-
-      const { data: barItems } = await supabase
-        .from('order_items')
-        .update({
-          status: 'READY',
-          ready_at: nowIso,
-        })
-        .eq('session_id', selectedSession.id)
-        .eq('station', 'BAR_INSTANT')
-        .neq('status', 'CANCELLED')
-        .select('*');
-
-      const updatedItems = [...(kitchenItems ?? []), ...(barItems ?? [])];
-      if (updatedItems.length > 0) {
-        const updatedMap = new Map(updatedItems.map((i) => [i.id, i]));
-        setOrderItems((prev) =>
-          prev.map((i) => updatedMap.get(i.id) ?? i)
-        );
-      }
-
-      // Trừ kho nguyên liệu (EXPORT_SALE) cho các món có linked_ingredient_id
-      for (const item of updatedItems) {
-        const menu = menuMap.get(item.menu_item_id);
-        if (menu?.linked_ingredient_id) {
-          const { data: ing } = await supabase
-            .from('ingredients')
-            .select('id, name, stock_quantity, unit_cost')
-            .eq('id', menu.linked_ingredient_id)
-            .single();
-
-          if (ing) {
-            const nextStock = Math.max(0, ing.stock_quantity - item.quantity);
-            await supabase
-              .from('ingredients')
-              .update({ stock_quantity: nextStock })
-              .eq('id', ing.id);
-
-            await supabase.from('inventory_logs').insert({
-              ingredient_id: ing.id,
-              type: 'EXPORT_SALE',
-              quantity_change: -item.quantity,
-              total_cost: item.quantity * ing.unit_cost,
-              note: `Chủ quán duyệt CK đơn mang về (${
-                selectedSession.payment_code ?? selectedSession.session_token
-              }): ${item.quantity}x ${menu.name}`,
-              created_by: validAdminId,
-            });
-          }
-        }
       }
 
       setSessions((prev) =>

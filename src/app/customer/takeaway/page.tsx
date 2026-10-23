@@ -1,3 +1,4 @@
+import { publicMenu } from '@/lib/services/snapshots';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { TakeawayOrderView } from '@/components/customer/TakeawayOrderView';
 
@@ -14,5 +15,5 @@ export default async function TakeawayPage() {
     .order('category', { ascending: true })
     .order('name', { ascending: true });
 
-  return <TakeawayOrderView initialMenuItems={menuItems ?? []} />;
+  return <TakeawayOrderView initialMenuItems={(menuItems ?? []).map(publicMenu)} />;
 }

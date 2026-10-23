@@ -526,7 +526,7 @@ export function StaffAndTableManager({
             Quản lý Khu vực, Bàn & Phân công Nhân sự
           </h2>
           <p className="text-sm text-zinc-400 mt-1">
-            Thiết lập sơ đồ Khu vực (`zones`), Bàn vật lý (`tables`) và phân công Nhân viên phụ trách bàn/khu vực để định tuyến Web Push Notification.
+            Quản lý khu vực, bàn và phân công nhân viên để gửi cảnh báo món chín đúng người trong ứng dụng.
           </p>
         </div>
 
@@ -832,7 +832,7 @@ export function StaffAndTableManager({
                 <th className="py-3 px-4">Clerk User ID</th>
                 <th className="py-3 px-4">Vai trò (Role)</th>
                 <th className="py-3 px-4">Khu vực phụ trách</th>
-                <th className="py-3 px-4">Web Push</th>
+                <th className="py-3 px-4">Thông báo nội bộ</th>
                 <th className="py-3 px-4">Trạng thái</th>
                 <th className="py-3 px-4 text-right">Thao tác</th>
               </tr>
@@ -886,13 +886,7 @@ export function StaffAndTableManager({
                         </select>
                       </td>
                       <td className="py-3.5 px-4 text-xs">
-                        {staff.push_subscription ? (
-                          <span className="text-emerald-400 font-medium">
-                            Đã bật thông báo
-                          </span>
-                        ) : (
-                          <span className="text-zinc-500">Chưa đăng ký</span>
-                        )}
+                        <span className="text-zinc-400">{staff.is_active ? 'Nhận khi mở app' : 'Tạm dừng'}</span>
                       </td>
                       <td className="py-3.5 px-4">
                         <button

@@ -24,6 +24,7 @@ import {
   BarChart3,
   ChefHat,
 } from 'lucide-react';
+import { useAppEvents } from '@/lib/use-app-events';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   formatVND,
@@ -76,13 +77,14 @@ export function StaffDashboard({
   initialTables,
   initialSessions,
   initialOrderItems,
-  menuItems,
+  menuItems: initialMenuItems,
   initialIngredients,
   staffProfiles,
   currentStaffId,
   currentStaffRole,
 }: StaffDashboardProps) {
   const supabase = createSupabaseBrowserClient();
+  const [menuItems, setMenuItems] = useState(initialMenuItems);
 
   const [zones] = useState<ZoneRow[]>(initialZones);
   const [tables, setTables] = useState<TableRow[]>(initialTables);
@@ -207,85 +209,10 @@ export function StaffDashboard({
   // ==========================================================================
   // LẮNG NGHE SUPABASE REALTIME (ORDER_ITEMS & TABLE_SESSIONS) + DỌN DẸP KÊNH
   // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('staff-realtime-channel')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            setOrderItems((prev) => {
-              if (prev.some((i) => i.id === newItem.id)) return prev;
-              return [newItem, ...prev];
-            });
-            if (newItem.status === 'READY') {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            const oldItem = payload.old as Partial<OrderItemRow>;
-            setOrderItems((prev) =>
-              prev.map((i) => (i.id === updatedItem.id ? updatedItem : i))
-            );
-            if (
-              updatedItem.status === 'READY' &&
-              oldItem.status !== 'READY'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string }).id;
-            if (deletedId) {
-              setOrderItems((prev) => prev.filter((i) => i.id !== deletedId));
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newSession = payload.new as TableSessionRow;
-            setSessions((prev) => {
-              if (prev.some((s) => s.id === newSession.id)) return prev;
-              return [newSession, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedSession = payload.new as TableSessionRow;
-            const oldSession = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) =>
-              prev.map((s) =>
-                s.id === updatedSession.id ? updatedSession : s
-              )
-            );
-            // Phát chuông khi khách bấm "Gọi tính tiền" (REQUEST_BILL)
-            if (
-              updatedSession.status === 'REQUEST_BILL' &&
-              oldSession.status !== 'REQUEST_BILL'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    // Bắt buộc dọn dẹp kết nối Realtime khi unmount theo Mục 2.2 AGENTS.md
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+  const live = useAppEvents((snapshot) => {
+    setOrderItems(snapshot.orders); setSessions(snapshot.sessions);
+    setTables(snapshot.tables); setIngredients(snapshot.ingredients); setMenuItems(snapshot.menu);
+  }, { sound: true, view: 'staff' });
 
   // Danh sách các món đã chín / đồ uống lấy ngay (status === 'READY') đang chờ bưng
   const readyOrderItems = useMemo(() => {
@@ -460,51 +387,6 @@ export function StaffDashboard({
         throw new Error(insertError?.message ?? 'Không thể thêm món vào bàn');
       }
 
-      // Nếu món có liên kết kho nguyên liệu (VD: Bia / Nước ngọt), tự động trừ kho & ghi log EXPORT_SALE
-      if (menuItem.linked_ingredient_id) {
-        const linkedIng = ingredientMap.get(menuItem.linked_ingredient_id);
-        if (linkedIng) {
-          const updatedStock = Math.max(0, linkedIng.stock_quantity - qty);
-          const { data: updatedIng } = await supabase
-            .from('ingredients')
-            .update({ stock_quantity: updatedStock })
-            .eq('id', linkedIng.id)
-            .select('*')
-            .single();
-
-          if (updatedIng) {
-            setIngredients((prev) =>
-              prev.map((i) => (i.id === updatedIng.id ? updatedIng : i))
-            );
-          }
-
-          await supabase.from('inventory_logs').insert({
-            ingredient_id: linkedIng.id,
-            type: 'EXPORT_SALE',
-            quantity_change: -qty,
-            total_cost: qty * linkedIng.unit_cost,
-            note: `Xuất bán ${qty} ${linkedIng.unit} (${menuItem.name}) cho ${
-              activeTable?.table_number ?? 'Bàn'
-            }`,
-            created_by: validCurrentStaffId,
-          });
-        }
-      }
-
-      // Nếu là món BAR_INSTANT, gọi thông báo đẩy cho nhân viên phụ trách bàn
-      if (isInstantBar) {
-        void fetch('/api/push/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderItemId: insertedItem.id,
-            sessionId: activeTableSession.id,
-            title: `${activeTable?.table_number ?? 'Bàn'}: Đồ uống lấy ngay`,
-            body: `${qty}x ${menuItem.name} cần mang ra bàn`,
-          }),
-        }).catch(() => undefined);
-      }
-
       const nextItems = [insertedItem, ...orderItems];
       setOrderItems(nextItems);
       await recalculateSessionTotal(activeTableSession.id, nextItems);
@@ -674,93 +556,13 @@ export function StaffDashboard({
     setErrorMessage(null);
 
     try {
-      let updatedOrderItem: OrderItemRow;
-
-      if (remainingQty > 0) {
-        const { data, error } = await supabase
-          .from('order_items')
-          .update({ quantity: remainingQty })
-          .eq('id', targetOrderItem.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật số lượng bia');
-        }
-        updatedOrderItem = data;
-      } else {
-        // Nếu khách trả lại toàn bộ số lon của dòng order_items này
-        const { data, error } = await supabase
-          .from('order_items')
-          .update({
-            status: 'CANCELLED',
-            cancelled_at: nowIso,
-            cancelled_by: validCurrentStaffId,
-            cancel_reason: `Khách trả lại toàn bộ ${returnQty} lon/chai (${
-              menuItem?.name ?? 'Đồ uống'
-            })`,
-          })
-          .eq('id', targetOrderItem.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật trả hết bia');
-        }
-        updatedOrderItem = data;
-      }
-
-      // Tìm nguyên liệu kho tương ứng để cộng trả tồn kho & ghi log RETURN_BEER
-      const linkedIngredient =
-        (menuItem?.linked_ingredient_id
-          ? ingredientMap.get(menuItem.linked_ingredient_id)
-          : undefined) ??
-        ingredients.find(
-          (ing) =>
-            menuItem &&
-            ing.name.toLowerCase() === menuItem.name.toLowerCase()
-        );
-
-      if (linkedIngredient) {
-        const newStock = linkedIngredient.stock_quantity + returnQty;
-        const { data: updatedIng, error: ingError } = await supabase
-          .from('ingredients')
-          .update({ stock_quantity: newStock })
-          .eq('id', linkedIngredient.id)
-          .select('*')
-          .single();
-
-        if (ingError) {
-          throw new Error(
-            `Không thể hoàn trả tồn kho: ${ingError.message}`
-          );
-        }
-
-        if (updatedIng) {
-          setIngredients((prev) =>
-            prev.map((i) => (i.id === updatedIng.id ? updatedIng : i))
-          );
-        }
-
-        const { error: logError } = await supabase
-          .from('inventory_logs')
-          .insert({
-            ingredient_id: linkedIngredient.id,
-            type: 'RETURN_BEER',
-            quantity_change: returnQty,
-            total_cost: returnQty * linkedIngredient.unit_cost,
-            note: `Trả lại ${returnQty} ${linkedIngredient.unit} từ ${
-              activeTable?.table_number ?? 'Bàn'
-            }`,
-            created_by: validCurrentStaffId,
-          });
-
-        if (logError) {
-          throw new Error(
-            `Không thể ghi log RETURN_BEER: ${logError.message}`
-          );
-        }
-      }
+      const response = await fetch('/api/orders/return-beer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderItemId: targetOrderItem.id, quantity: returnQty }),
+      });
+      const result = await response.json() as { error?: string; order: OrderItemRow };
+      if (!response.ok) throw new Error(result.error || 'Khong tra duoc bia.');
+      const updatedOrderItem = result.order;
 
       const nextItems = orderItems.map((i) =>
         i.id === updatedOrderItem.id ? updatedOrderItem : i
@@ -829,7 +631,7 @@ export function StaffDashboard({
     if (!activeTableSession) return false;
     if ((currentStaffRole === 'admin' || currentStaffRole === 'operator')) return true;
     if (!activeTableSession.assigned_staff_id || !validCurrentStaffId) {
-      return true;
+      return false;
     }
     return activeTableSession.assigned_staff_id === validCurrentStaffId;
   }, [activeTableSession, currentStaffRole, validCurrentStaffId]);
@@ -921,6 +723,10 @@ export function StaffDashboard({
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-3 sm:p-6 space-y-6">
       {/* Top Bar Nhân viên chạy bàn */}
+      <div role="status" className="border-b border-zinc-800 px-4 py-2 text-sm text-amber-300">
+        {live.connected ? 'Đã kết nối thông báo nội bộ' : 'Đang kết nối lại thông báo...'}
+        {live.alerts.length > 0 && <span> - {live.alerts[0].message} ({live.alerts.length})</span>}
+      </div>
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">

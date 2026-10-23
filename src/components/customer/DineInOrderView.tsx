@@ -22,7 +22,8 @@ import {
   Lock,
   X,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useAppEvents } from '@/lib/use-app-events';
+import type { KitchenQueueEntry } from '@/lib/services/snapshots';
 import { useCartStore } from '@/lib/store/useCartStore';
 import {
   formatVND,
@@ -30,7 +31,6 @@ import {
   cn,
 } from '@/lib/utils';
 import type {
-  IngredientRow,
   MenuCategory,
   MenuItemRow,
   OrderItemRow,
@@ -46,8 +46,7 @@ interface DineInOrderViewProps {
   zone: ZoneRow | null;
   initialMenuItems: MenuItemRow[];
   initialSessionOrders: OrderItemRow[];
-  initialGlobalKitchenQueue: OrderItemRow[];
-  initialIngredients: IngredientRow[];
+  initialGlobalKitchenQueue: KitchenQueueEntry[];
 }
 
 type CustomerTab = 'MENU' | 'PROGRESS' | 'BILL';
@@ -69,19 +68,16 @@ export function DineInOrderView({
   initialMenuItems,
   initialSessionOrders,
   initialGlobalKitchenQueue,
-  initialIngredients,
 }: DineInOrderViewProps) {
-  const supabase = createSupabaseBrowserClient();
 
   const [session, setSession] = useState<TableSessionRow>(initialSession);
   const [menuItems, setMenuItems] = useState<MenuItemRow[]>(initialMenuItems);
   const [sessionOrders, setSessionOrders] =
     useState<OrderItemRow[]>(initialSessionOrders);
-  const [globalKitchenQueue, setGlobalKitchenQueue] = useState<OrderItemRow[]>(
+  const [globalKitchenQueue, setGlobalKitchenQueue] = useState<KitchenQueueEntry[]>(
     initialGlobalKitchenQueue
   );
-  const [ingredients, setIngredients] =
-    useState<IngredientRow[]>(initialIngredients);
+
 
   const [activeTab, setActiveTab] = useState<CustomerTab>('MENU');
   const [selectedCategory, setSelectedCategory] = useState<
@@ -146,111 +142,17 @@ export function DineInOrderView({
     return map;
   }, [menuItems]);
 
-  const ingredientMap = useMemo(() => {
-    const map = new Map<string, IngredientRow>();
-    ingredients.forEach((i) => map.set(i.id, i));
-    return map;
-  }, [ingredients]);
+
 
   // ==========================================================================
   // LẮNG NGHE SUPABASE REALTIME (ORDER_ITEMS, TABLE_SESSIONS, MENU_ITEMS)
-  // Bắt buộc removeChannel trong cleanup của useEffect (Mục 2.2 AGENTS.md)
+  // The SSE hook closes its EventSource when the view unmounts.
   // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel(`dine-in-session-${initialSession.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            if (newItem.session_id === initialSession.id) {
-              setSessionOrders((prev) => {
-                if (prev.some((i) => i.id === newItem.id)) return prev;
-                return [newItem, ...prev];
-              });
-            }
-            if (
-              newItem.station === 'KITCHEN' &&
-              newItem.status === 'QUEUED'
-            ) {
-              setGlobalKitchenQueue((prev) => {
-                if (prev.some((i) => i.id === newItem.id)) return prev;
-                return [...prev, newItem];
-              });
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            if (updatedItem.session_id === initialSession.id) {
-              setSessionOrders((prev) =>
-                prev.map((i) => (i.id === updatedItem.id ? updatedItem : i))
-              );
-            }
-            setGlobalKitchenQueue((prev) => {
-              const exists = prev.some((i) => i.id === updatedItem.id);
-              if (
-                updatedItem.station === 'KITCHEN' &&
-                updatedItem.status === 'QUEUED'
-              ) {
-                return exists
-                  ? prev.map((i) =>
-                      i.id === updatedItem.id ? updatedItem : i
-                    )
-                  : [...prev, updatedItem];
-              }
-              return prev.filter((i) => i.id !== updatedItem.id);
-            });
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string }).id;
-            if (deletedId) {
-              setSessionOrders((prev) =>
-                prev.filter((i) => i.id !== deletedId)
-              );
-              setGlobalKitchenQueue((prev) =>
-                prev.filter((i) => i.id !== deletedId)
-              );
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'table_sessions',
-          filter: `id=eq.${initialSession.id}`,
-        },
-        (payload) => {
-          const updatedSession = payload.new as TableSessionRow;
-          setSession(updatedSession);
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'menu_items',
-        },
-        (payload) => {
-          const updatedMenu = payload.new as MenuItemRow;
-          setMenuItems((prev) =>
-            prev.map((m) => (m.id === updatedMenu.id ? updatedMenu : m))
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase, initialSession.id]);
+  useAppEvents((snapshot) => {
+    if (snapshot.sessions[0]) setSession(snapshot.sessions[0]);
+    setSessionOrders(snapshot.orders); setMenuItems(snapshot.menu);
+    setGlobalKitchenQueue(snapshot.queue);
+  }, { token: initialSession.session_token });
 
   // ==========================================================================
   // CÔNG THỨC TÍNH VỊ TRÍ HÀNG ĐỢI CHUẨN MỤC 5.3 PRD_SPEC.MD
@@ -336,156 +238,13 @@ export function DineInOrderView({
     setFeedbackMessage(null);
 
     try {
-      // 1. KIỂM TRA BẢO MẬT ANTI-FRAUD (Mục 3.2 AGENTS.md):
-      // Bắt buộc kiểm tra trực tiếp trên DB xem table_sessions.status === 'ACTIVE'
-      const { data: freshSession, error: sessionError } = await supabase
-        .from('table_sessions')
-        .select('*')
-        .eq('id', session.id)
-        .eq('session_token', session.session_token)
-        .single();
-
-      if (sessionError || !freshSession) {
-        throw new Error('Phiên gọi món không hợp lệ hoặc không tồn tại.');
-      }
-
-      if (freshSession.status !== 'ACTIVE') {
-        setSession(freshSession);
-        throw new Error(
-          freshSession.status === 'CLOSED'
-            ? 'Phiên bàn này đã đóng thanh toán. Mã QR đã hết hiệu lực.'
-            : 'Bàn đang chờ thanh toán hoặc chưa kích hoạt, không thể gọi thêm món.'
-        );
-      }
-
-      // 2. Lấy dữ liệu menu_items mới nhất từ DB để lấy đúng Snapshot Price và kiểm tra 86ing
-      const cartMenuIds = cartItems.map((c) => c.menu_item_id);
-      const { data: freshMenuItems, error: menuErr } = await supabase
-        .from('menu_items')
-        .select('*')
-        .in('id', cartMenuIds);
-
-      if (menuErr || !freshMenuItems) {
-        throw new Error('Không thể kiểm tra thực đơn mới nhất.');
-      }
-
-      const freshMenuMap = new Map<string, MenuItemRow>();
-      freshMenuItems.forEach((m) => freshMenuMap.set(m.id, m));
-
-      for (const c of cartItems) {
-        const dbMenu = freshMenuMap.get(c.menu_item_id);
-        if (!dbMenu || !dbMenu.is_available) {
-          throw new Error(
-            `Món "${c.name}" vừa tạm hết hàng (86). Vui lòng xóa khỏi giỏ hàng.`
-          );
-        }
-      }
-
-      const nowIso = new Date().toISOString();
-
-      // 3. Chuẩn bị danh sách order_items:
-      // - Snapshot Price: copy price -> unit_price, cost_price -> unit_cost_price
-      // - Phân luồng: BAR_INSTANT -> status = 'READY', ready_at = NOW()
-      //               KITCHEN -> status = 'QUEUED', ready_at = null
-      const rowsToInsert = cartItems.map((c) => {
-        const dbMenu = freshMenuMap.get(c.menu_item_id)!;
-        const isBarInstant = dbMenu.station === 'BAR_INSTANT';
-
-        return {
-          session_id: freshSession.id,
-          menu_item_id: dbMenu.id,
-          quantity: c.quantity,
-          note: c.note.trim() || null,
-          station: dbMenu.station,
-          status: isBarInstant ? ('READY' as const) : ('QUEUED' as const),
-          unit_price: dbMenu.price,
-          unit_cost_price: dbMenu.cost_price,
-          created_at: nowIso,
-          ready_at: isBarInstant ? nowIso : null,
-        };
+      const response = await fetch('/api/customer/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: session.session_token, items: cartItems.map((item) => ({ menu_item_id: item.menu_item_id, quantity: item.quantity, note: item.note })) }),
       });
-
-      const { data: insertedOrders, error: insertError } = await supabase
-        .from('order_items')
-        .insert(rowsToInsert)
-        .select('*');
-
-      if (insertError || !insertedOrders) {
-        throw new Error(
-          insertError?.message ?? 'Không thể gửi đơn gọi món vào hệ thống.'
-        );
-      }
-
-      // 4. Tự động trừ kho nguyên liệu nếu món có linked_ingredient_id và gọi thông báo nếu là BAR_INSTANT
-      for (const inserted of insertedOrders) {
-        const dbMenu = freshMenuMap.get(inserted.menu_item_id);
-        if (dbMenu?.linked_ingredient_id) {
-          const ing = ingredientMap.get(dbMenu.linked_ingredient_id);
-          if (ing) {
-            const newStock = Math.max(
-              0,
-              ing.stock_quantity - inserted.quantity
-            );
-            const { data: updatedIng } = await supabase
-              .from('ingredients')
-              .update({ stock_quantity: newStock })
-              .eq('id', ing.id)
-              .select('*')
-              .single();
-
-            if (updatedIng) {
-              setIngredients((prev) =>
-                prev.map((item) =>
-                  item.id === updatedIng.id ? updatedIng : item
-                )
-              );
-            }
-
-            await supabase.from('inventory_logs').insert({
-              ingredient_id: ing.id,
-              type: 'EXPORT_SALE',
-              quantity_change: -inserted.quantity,
-              total_cost: inserted.quantity * ing.unit_cost,
-              note: `Khách đặt tại ${table?.table_number ?? 'Bàn'}: ${
-                inserted.quantity
-              }x ${dbMenu.name}`,
-              created_by: freshSession.assigned_staff_id,
-            });
-          }
-        }
-
-        if (inserted.station === 'BAR_INSTANT') {
-          void fetch('/api/push/notify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderItemId: inserted.id,
-              sessionId: freshSession.id,
-              title: `${table?.table_number ?? 'Bàn'}: Khách gọi đồ uống lấy ngay`,
-              body: `${inserted.quantity}x ${dbMenu?.name ?? 'Đồ uống'}`,
-            }),
-          }).catch(() => undefined);
-        }
-      }
-
-      // 5. Cập nhật tổng tiền tạm tính trên table_sessions
-      const addedSum = insertedOrders.reduce(
-        (sum, item) => sum + item.unit_price * item.quantity,
-        0
-      );
-      const updatedTotal = liveBillTotalAmount + addedSum;
-
-      const { data: updatedSessionData } = await supabase
-        .from('table_sessions')
-        .update({ total_amount: updatedTotal })
-        .eq('id', freshSession.id)
-        .select('*')
-        .single();
-
-      if (updatedSessionData) {
-        setSession(updatedSessionData);
-      }
-
+      const result = await response.json() as { error?: string; orders: OrderItemRow[] };
+      if (!response.ok) throw new Error(result.error || 'Không gửi được món.');
+      const insertedOrders = result.orders;
       setSessionOrders((prev) => {
         const existingIds = new Set(prev.map((p) => p.id));
         const uniqueInserted = insertedOrders.filter(
@@ -541,34 +300,13 @@ export function DineInOrderView({
     setFeedbackMessage(null);
 
     try {
-      const { data, error } = await supabase
-        .from('table_sessions')
-        .update({
-          status: 'REQUEST_BILL',
-          payment_method: selectedPaymentMethod,
-          total_amount: liveBillTotalAmount,
-        })
-        .eq('id', session.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể gửi yêu cầu gọi tính tiền.'
-        );
-      }
-
-      setSession(data);
-
-      void fetch('/api/push/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: session.id,
-          title: `${table?.table_number ?? 'Bàn'} gọi tính tiền!`,
-          body: `Tổng: ${formatVND(liveBillTotalAmount)} (${selectedPaymentMethod})`,
-        }),
-      }).catch(() => undefined);
+      const response = await fetch('/api/customer/session', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: session.session_token, paymentMethod: selectedPaymentMethod }),
+      });
+      const result = await response.json() as { error?: string; session: TableSessionRow };
+      if (!response.ok) throw new Error(result.error || 'Không gửi được yêu cầu tính tiền.');
+      setSession(result.session);
 
       setFeedbackMessage({
         type: 'success',

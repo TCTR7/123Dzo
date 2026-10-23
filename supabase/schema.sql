@@ -597,3 +597,28 @@ AS $$
     WHERE sp.role IN ('staff', 'admin')
     ORDER BY active_serving_count DESC, managed_tables_revenue DESC;
 $$;
+
+-- Browser access goes through authorized Next.js APIs and scoped SSE snapshots.
+-- Apply this permission block to existing projects too; no tables/columns/RPCs change.
+REVOKE ALL ON TABLE public.zones, public.staff_profiles, public.tables,
+    public.ingredients, public.inventory_logs, public.menu_items,
+    public.table_sessions, public.order_items FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.zones, public.staff_profiles, public.tables,
+    public.ingredients, public.inventory_logs, public.menu_items,
+    public.table_sessions, public.order_items TO service_role;
+
+REVOKE ALL ON TABLE public.vw_kpi_financial_summary, public.vw_kpi_peak_hours,
+    public.vw_kpi_menu_analytics, public.vw_kpi_kitchen_performance,
+    public.vw_kpi_waitstaff_performance FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.vw_kpi_financial_summary, public.vw_kpi_peak_hours,
+    public.vw_kpi_menu_analytics, public.vw_kpi_kitchen_performance,
+    public.vw_kpi_waitstaff_performance TO service_role;
+
+REVOKE ALL ON FUNCTION public.fn_get_financial_kpi(timestamptz, timestamptz),
+    public.fn_get_menu_kpi(timestamptz, timestamptz),
+    public.fn_get_kitchen_kpi(timestamptz, timestamptz),
+    public.fn_get_waitstaff_kpi(timestamptz, timestamptz) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_get_financial_kpi(timestamptz, timestamptz),
+    public.fn_get_menu_kpi(timestamptz, timestamptz),
+    public.fn_get_kitchen_kpi(timestamptz, timestamptz),
+    public.fn_get_waitstaff_kpi(timestamptz, timestamptz) TO service_role;

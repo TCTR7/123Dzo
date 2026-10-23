@@ -4,7 +4,7 @@ import { resolveStaffProfile, getHomeByRole, OperatorRoleConstraintError } from 
 import type { StaffProfileRow } from '@/types/database.types';
 
 const isPublicRoute = createRouteMatcher([
-  '/', '/customer/order/(.*)', '/customer/takeaway(.*)',
+  '/', '/manifest.json', '/customer/order/(.*)', '/customer/takeaway(.*)', '/api/customer/(.*)', '/api/events',
   '/api/webhooks/(.*)', '/api/cron/keep-alive(.*)',
   '/api/supabase-proxy/(.*)', '/sign-in(.*)', '/sign-up(.*)',
 ]);

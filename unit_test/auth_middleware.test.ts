@@ -25,6 +25,10 @@ beforeEach(() => {
 });
 
 describe('Authorization middleware', () => {
+  it('allows the PWA manifest without a Clerk session', async () => {
+    const response = await run('/manifest.json');
+    expect(response.status).toBe(200); expect(mocks.protect).not.toHaveBeenCalled(); expect(mocks.resolve).not.toHaveBeenCalled();
+  });
   it('redirects an outdated role constraint to a readable setup page instead of throwing', async () => {
     mocks.resolve.mockRejectedValue(new OperatorRoleConstraintError());
     const response = await run('/admin');

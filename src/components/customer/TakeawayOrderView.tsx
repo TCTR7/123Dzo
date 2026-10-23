@@ -19,7 +19,7 @@ import {
   History,
   X,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useAppEvents } from '@/lib/use-app-events';
 import { formatVND, cn } from '@/lib/utils';
 import type {
   MenuCategory,
@@ -58,21 +58,6 @@ const VIETQR_ACCOUNT_NO =
 const VIETQR_ACCOUNT_NAME =
   process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NAME ?? 'QUAN NHAU 123DZO';
 
-function generateTakeawayToken(): string {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let token = 'tw_';
-  for (let i = 0; i < 10; i += 1) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
-
-function generatePaymentCode(): string {
-  const randomSuffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  const timePart = Date.now().toString(36).slice(-4).toUpperCase();
-  return `DZO${timePart}${randomSuffix}`;
-}
-
 function normalizePhone(phone: string): string {
   return phone.replace(/\s+/g, '').replace(/[^0-9]/g, '');
 }
@@ -80,7 +65,6 @@ function normalizePhone(phone: string): string {
 export function TakeawayOrderView({
   initialMenuItems,
 }: TakeawayOrderViewProps) {
-  const supabase = createSupabaseBrowserClient();
 
   const [menuItems, setMenuItems] = useState<MenuItemRow[]>(initialMenuItems);
   const [activeView, setActiveView] = useState<'ORDER' | 'LOOKUP'>('ORDER');
@@ -153,69 +137,12 @@ export function TakeawayOrderView({
 
   // ==========================================================================
   // LẮNG NGHE SUPABASE REALTIME CHO PHIÊN MANG VỀ ĐANG THEO DÕI
-  // Bắt buộc removeChannel trong cleanup của useEffect (Mục 2.2 AGENTS.md)
+  // useAppEvents closes the EventSource when switching sessions or unmounting.
   // ==========================================================================
-  useEffect(() => {
-    if (!currentSession) return;
-
-    const channel = supabase
-      .channel(`takeaway-session-${currentSession.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'table_sessions',
-          filter: `id=eq.${currentSession.id}`,
-        },
-        (payload) => {
-          const updated = payload.new as TableSessionRow;
-          setCurrentSession(updated);
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-          filter: `session_id=eq.${currentSession.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            setCurrentOrderItems((prev) => {
-              if (prev.some((i) => i.id === newItem.id)) return prev;
-              return [...prev, newItem];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            setCurrentOrderItems((prev) =>
-              prev.map((i) => (i.id === updatedItem.id ? updatedItem : i))
-            );
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'menu_items',
-        },
-        (payload) => {
-          const updatedMenu = payload.new as MenuItemRow;
-          setMenuItems((prev) =>
-            prev.map((m) => (m.id === updatedMenu.id ? updatedMenu : m))
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase, currentSession]);
+  useAppEvents((snapshot) => {
+    if (snapshot.sessions[0]) setCurrentSession(snapshot.sessions[0]);
+    setCurrentOrderItems(snapshot.orders); setMenuItems(snapshot.menu);
+  }, { token: currentSession?.session_token, enabled: Boolean(currentSession) });
 
   function saveOrderToLocalStorage(record: StoredTakeawayRecord) {
     if (typeof window === 'undefined') return;
@@ -321,90 +248,18 @@ export function TakeawayOrderView({
     setErrorMessage(null);
 
     try {
-      // Kiểm tra lại giá và trạng thái còn hàng (is_available) từ bảng menu_items
-      const menuIds = cart.map((c) => c.menuItem.id);
-      const { data: freshMenus, error: menuErr } = await supabase
-        .from('menu_items')
-        .select('*')
-        .in('id', menuIds);
-
-      if (menuErr || !freshMenus) {
-        throw new Error('Không thể kiểm tra thực đơn hiện tại.');
-      }
-
-      const freshMenuMap = new Map<string, MenuItemRow>();
-      freshMenus.forEach((m) => freshMenuMap.set(m.id, m));
-
-      let verifiedTotalAmount = 0;
-      for (const c of cart) {
-        const dbMenu = freshMenuMap.get(c.menuItem.id);
-        if (!dbMenu || !dbMenu.is_available) {
-          throw new Error(
-            `Món "${c.menuItem.name}" vừa tạm hết hàng. Vui lòng chọn món khác.`
-          );
-        }
-        verifiedTotalAmount += dbMenu.price * c.quantity;
-      }
-
-      const sessionToken = generateTakeawayToken();
-      const paymentCode = generatePaymentCode();
-      const nowIso = new Date().toISOString();
-
-      // 1. Tạo table_sessions với session_type = 'TAKEAWAY' và status = 'PENDING_PAYMENT'
-      const { data: createdSession, error: sessionErr } = await supabase
-        .from('table_sessions')
-        .insert({
-          session_token: sessionToken,
-          session_type: 'TAKEAWAY',
-          table_id: null,
-          assigned_staff_id: null,
-          customer_name: trimmedName,
-          customer_phone: cleanedPhone,
-          status: 'PENDING_PAYMENT',
-          payment_method: 'VIETQR',
-          payment_code: paymentCode,
-          total_amount: verifiedTotalAmount,
-          opened_at: nowIso,
-        })
-        .select('*')
-        .single();
-
-      if (sessionErr || !createdSession) {
-        throw new Error(
-          sessionErr?.message ?? 'Không thể khởi tạo đơn đặt mang về.'
-        );
-      }
-
-      // 2. Tạo các dòng order_items kèm Snapshot Price (unit_price, unit_cost_price)
-      // Lưu ý: Do table_sessions.status === 'PENDING_PAYMENT', màn hình Bếp (/kitchen) chặn hoàn toàn
-      // và chỉ hiển thị khi Webhook /api/webhooks/payment chuyển phiên sang ACTIVE
-      const orderPayloads = cart.map((c) => {
-        const dbMenu = freshMenuMap.get(c.menuItem.id)!;
-        return {
-          session_id: createdSession.id,
-          menu_item_id: dbMenu.id,
-          quantity: c.quantity,
-          note: c.note.trim() || null,
-          station: dbMenu.station,
-          status: 'QUEUED' as const,
-          unit_price: dbMenu.price,
-          unit_cost_price: dbMenu.cost_price,
-          created_at: nowIso,
-        };
+      const response = await fetch('/api/customer/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerName: trimmedName, customerPhone: cleanedPhone, items: cart.map((entry) => ({ menu_item_id: entry.menuItem.id, quantity: entry.quantity, note: entry.note })) }),
       });
+      const result = await response.json() as { error?: string; session: TableSessionRow; orders: OrderItemRow[] };
+      if (!response.ok) throw new Error(result.error || 'Không tạo được đơn mang về.');
+      const createdSession = result.session;
+      const insertedItems = result.orders;
+      const verifiedTotalAmount = createdSession.total_amount;
+      const paymentCode = createdSession.payment_code || '';
+      const nowIso = createdSession.opened_at;
 
-      const { data: insertedItems, error: itemsErr } = await supabase
-        .from('order_items')
-        .insert(orderPayloads)
-        .select('*');
-
-      if (itemsErr || !insertedItems) {
-        throw new Error(
-          itemsErr?.message ?? 'Không thể lưu danh sách món mang về.'
-        );
-      }
-
-      // 3. Lưu thông tin đơn vào localStorage theo SĐT để khách tra cứu lại bất cứ lúc nào
       saveOrderToLocalStorage({
         sessionId: createdSession.id,
         sessionToken: createdSession.session_token,
@@ -444,37 +299,18 @@ export function TakeawayOrderView({
     setErrorMessage(null);
 
     try {
-      // Kết hợp các sessionId đã lưu trong localStorage của SĐT này và truy vấn trực tiếp theo customer_phone
-      const localMatchingIds = savedRecords
-        .filter((r) => normalizePhone(r.customerPhone) === cleaned)
-        .map((r) => r.sessionId);
-
-      let query = supabase
-        .from('table_sessions')
-        .select('*')
-        .eq('session_type', 'TAKEAWAY')
-        .order('opened_at', { ascending: false })
-        .limit(10);
-
-      if (localMatchingIds.length > 0) {
-        query = query.or(
-          `customer_phone.eq.${cleaned},id.in.(${localMatchingIds.join(',')})`
-        );
-      } else {
-        query = query.eq('customer_phone', cleaned);
+      // Phone filters local records; possession of the secret token authorizes a read.
+      const matching = savedRecords.filter((record) => normalizePhone(record.customerPhone) === cleaned);
+      const sessionsData: TableSessionRow[] = [];
+      for (const record of matching.slice(0, 10)) {
+        const response = await fetch(`/api/customer/session?token=${encodeURIComponent(record.sessionToken)}`, { cache: 'no-store' });
+        if (!response.ok) continue;
+        const snapshot = await response.json() as { sessions: TableSessionRow[] };
+        if (snapshot.sessions[0]) sessionsData.push(snapshot.sessions[0]);
       }
-
-      const { data: sessionsData, error } = await query;
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      setLookedUpSessions(sessionsData ?? []);
-
-      if (sessionsData && sessionsData.length > 0) {
-        const latest = sessionsData[0]!;
-        await handleSelectSessionToTrack(latest);
-      }
+      setLookedUpSessions(sessionsData);
+      if (sessionsData[0]) await handleSelectSessionToTrack(sessionsData[0]);
+      else setErrorMessage('Không có đơn đã lưu trên thiết bị này. Dùng đường dẫn theo dõi có mã phiên hoặc liên hệ quán.');
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Không thể tra cứu đơn hàng.'
@@ -486,13 +322,10 @@ export function TakeawayOrderView({
 
   async function handleSelectSessionToTrack(targetSession: TableSessionRow) {
     setCurrentSession(targetSession);
-    const { data: items } = await supabase
-      .from('order_items')
-      .select('*')
-      .eq('session_id', targetSession.id)
-      .order('created_at', { ascending: true });
-
-    setCurrentOrderItems(items ?? []);
+    const response = await fetch(`/api/customer/session?token=${encodeURIComponent(targetSession.session_token)}`, { cache: 'no-store' });
+    if (!response.ok) { setErrorMessage('Không đọc được đơn.'); return; }
+    const snapshot = await response.json() as { orders: OrderItemRow[] };
+    setCurrentOrderItems(snapshot.orders);
   }
 
   const vietQrImageUrl = useMemo(() => {
@@ -1011,14 +844,12 @@ export function TakeawayOrderView({
                     <button
                       type="button"
                       onClick={async () => {
-                        const { data } = await supabase
-                          .from('table_sessions')
-                          .select('*')
-                          .eq('id', rec.sessionId)
-                          .single();
-                        if (data) {
-                          await handleSelectSessionToTrack(data);
-                        }
+                        try {
+                          const response = await fetch(`/api/customer/session?token=${encodeURIComponent(rec.sessionToken)}`, { cache: 'no-store' });
+                          if (!response.ok) throw new Error('Không đọc được đơn trên thiết bị này.');
+                          const snapshot = await response.json() as { sessions: TableSessionRow[] };
+                          if (snapshot.sessions[0]) await handleSelectSessionToTrack(snapshot.sessions[0]);
+                        } catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Không đọc được đơn.'); }
                       }}
                       className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-amber-300"
                     >

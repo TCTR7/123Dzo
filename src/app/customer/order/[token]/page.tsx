@@ -1,5 +1,6 @@
 import { Lock } from 'lucide-react';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { publicSession, readSnapshot } from '@/lib/services/snapshots';
 import { DineInOrderView } from '@/components/customer/DineInOrderView';
 
 export const dynamic = 'force-dynamic';
@@ -42,59 +43,10 @@ export default async function DineInTableTokenPage({
     );
   }
 
-  // 2. Tải thông tin bàn, khu vực, thực đơn, các món của bàn và hàng đợi bếp toàn quán (chỉ tính các phiên đang ACTIVE / REQUEST_BILL)
-  const [
-    tableRes,
-    menuRes,
-    sessionOrdersRes,
-    globalQueueRes,
-    activeSessionsRes,
-    ingredientsRes,
-  ] = await Promise.all([
-    session.table_id
-      ? supabase
-          .from('tables')
-          .select('id, table_number, zone_id, status, current_session_id')
-          .eq('id', session.table_id)
-          .single()
-      : Promise.resolve({ data: null }),
-    supabase
-      .from('menu_items')
-      .select(
-        'id, name, category, station, price, cost_price, prep_time_minutes, image_url, is_available, linked_ingredient_id'
-      )
-      .order('category', { ascending: true })
-      .order('name', { ascending: true }),
-    supabase
-      .from('order_items')
-      .select(
-        'id, session_id, menu_item_id, quantity, note, station, status, batch_id, unit_price, unit_cost_price, served_by_staff_id, created_at, cooking_started_at, ready_at, served_at, cancelled_at, cancelled_by, cancel_reason'
-      )
-      .eq('session_id', session.id)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('order_items')
-      .select(
-        'id, session_id, menu_item_id, quantity, note, station, status, batch_id, unit_price, unit_cost_price, served_by_staff_id, created_at, cooking_started_at, ready_at, served_at, cancelled_at, cancelled_by, cancel_reason'
-      )
-      .eq('station', 'KITCHEN')
-      .eq('status', 'QUEUED')
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('table_sessions')
-      .select('id')
-      .in('status', ['ACTIVE', 'REQUEST_BILL']),
-    supabase
-      .from('ingredients')
-      .select('id, name, unit, stock_quantity, min_threshold, unit_cost'),
-  ]);
-
-  const activeSessionIdSet = new Set(
-    (activeSessionsRes.data ?? []).map((s) => s.id)
-  );
-  const validGlobalKitchenQueue = (globalQueueRes.data ?? []).filter((item) =>
-    activeSessionIdSet.has(item.session_id)
-  );
+  const snapshot = await readSnapshot(null, token);
+  const tableRes = session.table_id
+    ? await supabase.from('tables').select('*').eq('id', session.table_id).single()
+    : { data: null };
 
   const table = tableRes.data ?? null;
 
@@ -108,13 +60,12 @@ export default async function DineInTableTokenPage({
 
   return (
     <DineInOrderView
-      initialSession={session}
+      initialSession={publicSession(session)}
       table={table}
       zone={zone ?? null}
-      initialMenuItems={menuRes.data ?? []}
-      initialSessionOrders={sessionOrdersRes.data ?? []}
-      initialGlobalKitchenQueue={validGlobalKitchenQueue}
-      initialIngredients={ingredientsRes.data ?? []}
+      initialMenuItems={snapshot.menu}
+      initialSessionOrders={snapshot.orders}
+      initialGlobalKitchenQueue={snapshot.queue}
     />
   );
 }

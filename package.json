@@ -28,7 +28,6 @@
     "recharts": "^2.15.1",
     "serwist": "^9.0.12",
     "tailwind-merge": "^3.0.2",
-    "web-push": "^3.6.7",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
@@ -36,7 +35,6 @@
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.20",
     "jsdom": "^26.0.0",
     "postcss": "^8.5.3",

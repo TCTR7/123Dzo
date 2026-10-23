@@ -19,6 +19,7 @@ import {
   BarChart3,
   LayoutGrid,
 } from 'lucide-react';
+import { useAppEvents } from '@/lib/use-app-events';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   playNotificationSound,
@@ -67,11 +68,12 @@ interface WakeLockSentinelLike {
 export function KitchenKdsBoard({
   initialKitchenOrders,
   initialActiveSessions,
-  tables,
+  tables: initialTables,
   initialMenuItems,
   currentStaffRole = 'kitchen',
 }: KitchenKdsBoardProps) {
   const supabase = createSupabaseBrowserClient();
+  const [tables, setTables] = useState(initialTables);
 
   const [orders, setOrders] = useState<OrderItemRow[]>(initialKitchenOrders);
   const [sessions, setSessions] = useState<TableSessionRow[]>(
@@ -161,116 +163,9 @@ export function KitchenKdsBoard({
   // ==========================================================================
   // 2. LẮNG NGHE SUPABASE REALTIME & DỌN DẸP KÊNH (MỤC 2.2 AGENTS.MD)
   // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('kitchen-kds-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            if (newItem.station !== 'KITCHEN') return;
-
-            setOrders((prev) => {
-              if (prev.some((i) => i.id === newItem.id)) return prev;
-              return [...prev, newItem];
-            });
-
-            // Chỉ phát chuông khi phiên bàn đã ACTIVE (chặn chuông từ đơn mang về đang PENDING_PAYMENT)
-            const sess = sessionMap.get(newItem.session_id);
-            if (
-              newItem.status === 'QUEUED' &&
-              sess &&
-              (sess.status === 'ACTIVE' || sess.status === 'REQUEST_BILL')
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            if (updatedItem.station !== 'KITCHEN') return;
-
-            setOrders((prev) => {
-              const exists = prev.some((i) => i.id === updatedItem.id);
-              if (
-                updatedItem.status === 'QUEUED' ||
-                updatedItem.status === 'COOKING'
-              ) {
-                return exists
-                  ? prev.map((i) =>
-                      i.id === updatedItem.id ? updatedItem : i
-                    )
-                  : [...prev, updatedItem];
-              }
-              return prev.filter((i) => i.id !== updatedItem.id);
-            });
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string }).id;
-            if (deletedId) {
-              setOrders((prev) => prev.filter((i) => i.id !== deletedId));
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newSession = payload.new as TableSessionRow;
-            setSessions((prev) => {
-              if (prev.some((s) => s.id === newSession.id)) return prev;
-              return [...prev, newSession];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedSession = payload.new as TableSessionRow;
-            const oldSession = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) => {
-              const exists = prev.some((s) => s.id === updatedSession.id);
-              return exists
-                ? prev.map((s) =>
-                    s.id === updatedSession.id ? updatedSession : s
-                  )
-                : [...prev, updatedSession];
-            });
-            // Khi đơn Mang về vừa được Webhook kích hoạt từ PENDING_PAYMENT -> ACTIVE, phát chuông báo Bếp
-            if (
-              updatedSession.status === 'ACTIVE' &&
-              oldSession.status === 'PENDING_PAYMENT'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'menu_items',
-        },
-        (payload) => {
-          const updatedMenu = payload.new as MenuItemRow;
-          setMenuItems((prev) =>
-            prev.map((m) => (m.id === updatedMenu.id ? updatedMenu : m))
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+  const live = useAppEvents((snapshot) => {
+    setOrders(snapshot.orders); setSessions(snapshot.sessions); setMenuItems(snapshot.menu); setTables(snapshot.tables);
+  }, { sound: true, view: 'kitchen' });
 
   // Chỉ hiển thị đơn của các phiên đã kích hoạt (ACTIVE / REQUEST_BILL)
   // Tuyệt đối chặn đơn Mang về đang PENDING_PAYMENT hoặc bàn đã CLOSED (Mục 3.2 AGENTS.md)
@@ -458,34 +353,6 @@ export function KitchenKdsBoard({
       const completedIds = new Set(data.map((d) => d.id));
       setOrders((prev) => prev.filter((item) => !completedIds.has(item.id)));
 
-      // Nhóm theo từng session_id để bắn thông báo đẩy Web Push cho đúng nhân viên phụ trách từng bàn
-      const itemsBySession = new Map<string, OrderItemRow[]>();
-      data.forEach((item) => {
-        const list = itemsBySession.get(item.session_id) ?? [];
-        list.push(item);
-        itemsBySession.set(item.session_id, list);
-      });
-
-      itemsBySession.forEach((sessionItems, sessionId) => {
-        const tableLabel = getSessionTableLabel(sessionId);
-        const summary = sessionItems
-          .map(
-            (i) =>
-              `${i.quantity}x ${menuMap.get(i.menu_item_id)?.name ?? 'Món ăn'}`
-          )
-          .join(', ');
-
-        void fetch('/api/push/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            orderItemIds: sessionItems.map((i) => i.id),
-            title: `🍲 MÓN CHÍN • ${tableLabel}`,
-            body: `${summary} đã nấu xong! Mời nhân viên vào Bếp bưng ra bàn.`,
-          }),
-        }).catch(() => undefined);
-      });
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Lỗi khi hoàn thành món'
@@ -532,6 +399,10 @@ export function KitchenKdsBoard({
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 lg:p-6 flex flex-col gap-5">
       {/* Top Header KDS Tablet */}
+      <div role="status" className="border-b border-zinc-800 px-4 py-2 text-sm text-amber-300">
+        {live.connected ? 'Đã kết nối thông báo nội bộ' : 'Đang kết nối lại thông báo...'}
+        {live.alerts.length > 0 && <span> - {live.alerts[0].message} ({live.alerts.length})</span>}
+      </div>
       <header className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-2xl bg-orange-500/15 border border-orange-500/40 flex items-center justify-center text-orange-400">

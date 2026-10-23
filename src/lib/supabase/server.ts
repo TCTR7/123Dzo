@@ -26,13 +26,11 @@ export async function createSupabaseServerClient(): Promise<
   const supabaseUrl = normalizeSupabaseUrl(
     process.env.NEXT_PUBLIC_SUPABASE_URL
   );
-  const supabaseKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseKey) {
     throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
+      'Missing SUPABASE_SERVICE_ROLE_KEY environment variable'
     );
   }
 
@@ -63,19 +61,17 @@ export async function createSupabaseServerClient(): Promise<
 /**
  * Khởi tạo Supabase Service Role Client (Admin privileges) tích hợp kiểu Database
  * Dùng cho các tác vụ hệ thống phía Server như Webhook thanh toán (/api/webhooks/payment)
- * hoặc gửi Web Push Notification (/api/push/notify).
+ * hoặc đọc snapshots thông báo nội bộ (/api/events).
  */
 export function createSupabaseServiceRoleClient(): SupabaseClient<Database> {
   const supabaseUrl = normalizeSupabaseUrl(
     process.env.NEXT_PUBLIC_SUPABASE_URL
   );
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!serviceRoleKey) {
     throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
+      'Missing SUPABASE_SERVICE_ROLE_KEY environment variable'
     );
   }
 

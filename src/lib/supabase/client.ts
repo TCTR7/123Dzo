@@ -13,9 +13,8 @@ function normalizeSupabaseUrl(rawUrl: string | undefined): string {
 
 /**
  * Khởi tạo Supabase Browser Client (Singleton trên trình duyệt) tích hợp kiểu Database
- * Sử dụng trong các Client Components ('use client') để truy vấn và lắng nghe Supabase Realtime.
- * Các truy vấn REST/Storage trên trình duyệt được định tuyến qua /api/supabase-proxy
- * khi gọi tới Supabase thật để không bị lỗi 42501 nếu anon role bị thu hồi quyền.
+ * Client Components use REST/Storage only through the authorized Next.js proxy.
+ * Live updates arrive separately through the scoped SSE endpoint /api/events.
  */
 export function createSupabaseBrowserClient(): SupabaseClient<Database> {
   const supabaseUrl = normalizeSupabaseUrl(
@@ -44,8 +43,7 @@ export function createSupabaseBrowserClient(): SupabaseClient<Database> {
           rawTarget.startsWith(supabaseUrl)
         ) {
           const parsed = new URL(rawTarget);
-          // Nếu đang trong môi trường E2E Playwright có route intercept trên *.supabase.co thì giữ nguyên,
-          // hoặc chuyển qua proxy nội bộ /api/supabase-proxy khi kết nối trực tiếp tới Supabase thật.
+          // Never send browser CRUD directly to the database with an anon key.
           const proxiedUrl = `${window.location.origin}/api/supabase-proxy${parsed.pathname}${parsed.search}`;
           return fetch(proxiedUrl, init);
         }

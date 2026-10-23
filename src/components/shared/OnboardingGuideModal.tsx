@@ -6,9 +6,9 @@ import type { StaffRole } from '@/types/database.types';
 type GuideTab = 'pwa' | 'admin' | 'staff' | 'kitchen';
 const tabs: { id: GuideTab; label: string; steps: string[] }[] = [
   { id: 'pwa', label: '📱 Cài App & Bật chuông', steps: [
-    'iPhone / iPad: mở bằng Safari → Chia sẻ (Share) → Thêm vào MH chính (Add to Home Screen). Mở app từ màn hình chính rồi bấm Bật thông báo đẩy và cho phép thông báo.',
+    'iPhone / iPad: mở bằng Safari → Chia sẻ (Share) → Thêm vào MH chính (Add to Home Screen). Mở app từ màn hình chính và giữ app mở trong ca làm việc.',
     'Android / máy tính bảng / Chrome: bấm Cài đặt ứng dụng trên thanh địa chỉ hoặc menu 3 chấm → Cài đặt / Thêm vào màn hình chính.',
-    'Đầu ca, bấm Kiểm tra chuông, bật âm lượng thiết bị và cho phép thông báo. Giữ màn hình Bếp mở khi làm việc.',
+    'Đầu ca, bấm Kiểm tra chuông và bật âm lượng thiết bị. Thông báo nội bộ được backend gửi tới app đang mở; khi đóng app hoặc khóa máy sẽ không có thông báo nền. Giữ màn hình Bếp mở khi làm việc.',
   ] },
   { id: 'admin', label: '👑 Chủ quán', steps: [
     'Dashboard KPI: xem doanh thu, lãi/lỗ, giờ vàng và hiệu suất bếp / nhân viên theo khoảng ngày.',

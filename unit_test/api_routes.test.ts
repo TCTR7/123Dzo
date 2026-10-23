@@ -50,7 +50,7 @@ describe('Unit Test: API Routes (/api/cron/keep-alive & /api/push/notify)', () =
     expect(body.zonesCount).toBe(3);
   });
 
-  it('POST /api/push/notify trả về 400 nếu thiếu cả sessionId và orderItemId(s)', async () => {
+  it('POST /api/push/notify trả về 410 vì đã chuyển sang thông báo nội bộ SSE', async () => {
     const req = new Request('http://localhost:3000/api/push/notify', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -58,6 +58,6 @@ describe('Unit Test: API Routes (/api/cron/keep-alive & /api/push/notify)', () =
     });
 
     const res = await pushNotifyPOST(req);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(410);
   });
 });
