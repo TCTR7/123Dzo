@@ -52,11 +52,11 @@ const TAKEAWAY_STORAGE_KEY = '123dzo-takeaway-orders-by-phone';
 const COOLDOWN_SECONDS = 5;
 
 const VIETQR_BANK_ID =
-  process.env.NEXT_PUBLIC_VIETQR_BANK_ID?.trim() ?? '';
+  process.env.NEXT_PUBLIC_VIETQR_BANK_ID ?? 'MB';
 const VIETQR_ACCOUNT_NO =
-  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NO?.trim() ?? '';
+  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NO ?? '0987654321';
 const VIETQR_ACCOUNT_NAME =
-  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NAME?.trim() ?? '';
+  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NAME ?? 'QUAN NHAU 123DZO';
 
 function generateTakeawayToken(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -595,8 +595,9 @@ export function TakeawayOrderView({
               <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs">
                 Quét mã <strong>VietQR</strong> bên dưới để thanh toán{' '}
                 <strong>{formatVND(currentSession.total_amount)}</strong>. Ngay
-                sau khi chuyển khoản thành công (2–5 giây), đơn hàng sẽ tự động
-                chuyển sang <strong>ACTIVE</strong> và đẩy thẳng vào Bếp!
+                sau khi bạn chuyển khoản, <strong>Chủ quán</strong> xác nhận đã
+                nhận tiền là đơn hàng sẽ lập tức chuyển sang{' '}
+                <strong>ACTIVE</strong> và đẩy thẳng vào Bếp chế biến!
               </div>
 
               <div className="bg-white p-4 rounded-2xl inline-block mx-auto shadow-lg">

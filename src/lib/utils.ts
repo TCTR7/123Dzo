@@ -1,7 +1,6 @@
 import imageCompression, { type Options as ImageCompressionOptions } from 'browser-image-compression';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { MENU_IMAGE_MAX_BYTES, MENU_IMAGE_MAX_SIDE } from '@/lib/menu-images/limits';
 
 /**
  * Gộp class Tailwind CSS an toàn, tránh xung đột style (chuẩn shadcn/ui)
@@ -28,19 +27,11 @@ export function formatVND(amount: number): string {
  * Tuân thủ nghiêm ngặt Mục 10.1 trong PRD_SPEC.md và AGENTS.md
  */
 export async function compressMenuImageToWebP(file: File): Promise<File> {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024) {
-    throw new Error('Chọn ảnh JPEG, PNG hoặc WebP, dung lượng tối đa 10MB.');
-  }
-  const bitmap = await createImageBitmap(file);
-  try {
-    if (!bitmap.width || !bitmap.height || bitmap.width > 4096 || bitmap.height > 4096 || bitmap.width * bitmap.height > 16000000) {
-      throw new Error('Ảnh quá lớn. Chọn ảnh tối đa 4096px mỗi chiều và 16 triệu điểm ảnh.');
-    }
-  } finally { bitmap.close(); }
+  const MAX_SIZE_BYTES = 80 * 1024; // 80KB
 
   const options: ImageCompressionOptions = {
     maxSizeMB: 0.075, // ~76.8KB (đảm bảo nghiêm ngặt < 80KB)
-    maxWidthOrHeight: MENU_IMAGE_MAX_SIDE,
+    maxWidthOrHeight: 1024,
     useWebWorker: true,
     fileType: 'image/webp',
     initialQuality: 0.8,
@@ -50,17 +41,13 @@ export async function compressMenuImageToWebP(file: File): Promise<File> {
 
   // Nếu sau lần nén đầu tiên vẫn nhỉnh hơn 80KB, ép chất lượng thêm 1 bước nữa
   let finalBlob: Blob = compressedBlob;
-  if (compressedBlob.size >= MENU_IMAGE_MAX_BYTES) {
+  if (compressedBlob.size > MAX_SIZE_BYTES) {
     finalBlob = await imageCompression(file, {
       ...options,
       maxSizeMB: 0.065,
       maxWidthOrHeight: 800,
       initialQuality: 0.65,
     });
-  }
-
-  if (!finalBlob.size || finalBlob.size >= MENU_IMAGE_MAX_BYTES || finalBlob.type !== 'image/webp') {
-    throw new Error('Ảnh sau nén phải là WebP nhỏ hơn 80KB. Vui lòng chọn ảnh khác.');
   }
 
   const baseName = file.name.replace(/\.[^/.]+$/, '');
@@ -73,12 +60,25 @@ export async function compressMenuImageToWebP(file: File): Promise<File> {
 }
 
 /**
- * Phát âm thanh cảnh báo (/sounds/ting-ting.wav) cho màn hình Bếp (/kitchen) và Nhân viên (/staff)
+ * Phát âm thanh cảnh báo (/sounds/ting-ting.mp3) cho màn hình Bếp (/kitchen) và Nhân viên (/staff)
  * Tuân thủ Mục 10.3 trong PRD_SPEC.md
  */
-export async function playNotificationSound(): Promise<void> {
-  const { playEnabledSound } = await import('@/lib/audio/notifications');
-  await playEnabledSound();
+export async function playNotificationSound(
+  soundUrl: string = '/sounds/ting-ting.mp3'
+): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const audio = new Audio(soundUrl);
+    audio.preload = 'auto';
+    audio.volume = 1.0;
+    await audio.play();
+  } catch (error) {
+    // Fallback hoặc trình duyệt chặn Autoplay khi chưa có tương tác người dùng
+    console.warn('Không thể phát âm thanh thông báo:', error);
+  }
 }
 
 /**

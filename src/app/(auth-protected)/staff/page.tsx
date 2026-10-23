@@ -1,14 +1,18 @@
-import { readAll } from '@/lib/data/lists';
-import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
-import { requireStaffPage } from '@/lib/auth/staff-guard';
+import { redirect } from 'next/navigation';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
 import { StaffDashboard } from '@/components/staff/StaffDashboard';
 
 export const dynamic = 'force-dynamic';
 
 export default async function StaffPage() {
+  const supabase = await createSupabaseServerClient();
   const { userId, role: currentStaffRole } =
-    await requireStaffPage(['staff', 'admin']);
-  const supabase = await createSupabaseServiceRoleClient();
+    await syncClerkStaffToSupabase(supabase);
+
+  if (currentStaffRole === 'kitchen') {
+    redirect('/kitchen');
+  }
 
   const [
     zonesRes,
@@ -16,41 +20,48 @@ export default async function StaffPage() {
     sessionsRes,
     orderItemsRes,
     menuRes,
+    ingredientsRes,
     staffRes,
   ] = await Promise.all([
-    readAll(after => { const q = supabase
+    supabase
       .from('zones')
-      .select('id, name, created_at').order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
-    readAll(after => { const q = supabase
+      .select('id, name, created_at')
+      .order('created_at', { ascending: true }),
+    supabase
       .from('tables')
-      .select('id, table_number, zone_id, status, current_session_id').order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
-    readAll(after => { const q = supabase
+      .select('id, table_number, zone_id, status, current_session_id')
+      .order('table_number', { ascending: true }),
+    supabase
       .from('table_sessions')
       .select(
-        'id, session_token, session_type, table_id, assigned_staff_id, customer_name, status, payment_method, total_amount, opened_at, activated_at, closed_at'
+        'id, session_token, session_type, table_id, assigned_staff_id, customer_name, customer_phone, status, payment_method, payment_code, total_amount, opened_at, closed_at'
       )
-      .in('status', ['ACTIVE', 'REQUEST_BILL']).order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
-    readAll(after => { const q = supabase
+      .neq('status', 'CLOSED'),
+    supabase
       .from('order_items')
       .select(
-        'id, session_id, menu_item_id, quantity, note, station, status, batch_id, unit_price, created_at, cooking_started_at, ready_at, served_at, cancelled_at, cancel_reason, table_sessions!inner(status)'
-      ).in('table_sessions.status',['ACTIVE','REQUEST_BILL']).order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
-    readAll(after => { const q = supabase
+        'id, session_id, menu_item_id, quantity, note, station, status, batch_id, unit_price, unit_cost_price, served_by_staff_id, created_at, cooking_started_at, ready_at, served_at, cancelled_at, cancelled_by, cancel_reason'
+      )
+      .order('created_at', { ascending: false })
+      .limit(300),
+    supabase
       .from('menu_items')
       .select(
-        'id, name, category, station, price, prep_time_minutes, image_url, is_available'
-      ).order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
-    readAll(after => { const q = supabase
+        'id, name, category, station, price, cost_price, prep_time_minutes, image_url, is_available, linked_ingredient_id'
+      )
+      .order('category', { ascending: true })
+      .order('name', { ascending: true }),
+    supabase
+      .from('ingredients')
+      .select('id, name, unit, stock_quantity, min_threshold, unit_cost'),
+    supabase
       .from('staff_profiles')
       .select(
-        'id, full_name, role, assigned_zone_id, is_active'
-      ).order('id', {ascending:true}).limit(250); return after ? q.gt('id', after) : q; }),
+        'id, full_name, role, assigned_zone_id, push_subscription, is_active'
+      )
+      .order('full_name', { ascending: true }),
   ]);
 
-  tablesRes.data.sort((a,b) => a.table_number.localeCompare(b.table_number, 'vi', {numeric:true}));
-  zonesRes.data.sort((a,b) => a.created_at.localeCompare(b.created_at, 'vi', {numeric:true}));
-  menuRes.data.sort((a,b) => a.name.localeCompare(b.name, 'vi', {numeric:true}));
-  staffRes.data.sort((a,b) => a.full_name.localeCompare(b.full_name, 'vi', {numeric:true}));
   return (
     <StaffDashboard
       initialZones={zonesRes.data ?? []}
@@ -58,6 +69,7 @@ export default async function StaffPage() {
       initialSessions={sessionsRes.data ?? []}
       initialOrderItems={orderItemsRes.data ?? []}
       menuItems={menuRes.data ?? []}
+      initialIngredients={ingredientsRes.data ?? []}
       staffProfiles={staffRes.data ?? []}
       currentStaffId={userId}
       currentStaffRole={currentStaffRole}

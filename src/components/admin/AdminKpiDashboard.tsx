@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -28,9 +28,7 @@ import {
   Layers,
   Award,
 } from 'lucide-react';
-import { reportRange } from '@/lib/data/report-range';
-import { parseAnalytics } from '@/lib/data/analytics-contract';
-import { isRecord } from '@/lib/orders/contracts';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { formatVND, cn } from '@/lib/utils';
 import type {
   KpiFinancialSummary,
@@ -46,7 +44,6 @@ interface AdminKpiDashboardProps {
   initialMenuAnalytics: KpiMenuAnalytics[];
   initialKitchenKpi: KpiKitchenPerformance;
   initialWaitstaffKpi: KpiWaitstaffPerformance[];
-  initialUpdatedAt?: string;
 }
 
 type DateRangePreset = 'ALL' | 'TODAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'CUSTOM';
@@ -60,12 +57,12 @@ export function AdminKpiDashboard({
   initialMenuAnalytics,
   initialKitchenKpi,
   initialWaitstaffKpi,
-  initialUpdatedAt,
 }: AdminKpiDashboardProps) {
+  const supabase = createSupabaseBrowserClient();
 
   const [financial, setFinancial] =
     useState<KpiFinancialSummary>(initialFinancial);
-  const [peakHours, setPeakHours] = useState<KpiPeakHour[]>(initialPeakHours);
+  const [peakHours] = useState<KpiPeakHour[]>(initialPeakHours);
   const [menuAnalytics, setMenuAnalytics] =
     useState<KpiMenuAnalytics[]>(initialMenuAnalytics);
   const [kitchenKpi, setKitchenKpi] =
@@ -73,10 +70,6 @@ export function AdminKpiDashboard({
   const [waitstaffKpi, setWaitstaffKpi] =
     useState<KpiWaitstaffPerformance[]>(initialWaitstaffKpi);
 
-  const requestRef = useRef<AbortController | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(initialUpdatedAt?new Date(initialUpdatedAt):null);
-  useEffect(() => () => requestRef.current?.abort(), []);
-  const [filterError, setFilterError] = useState<string | null>(null);
   const [preset, setPreset] = useState<DateRangePreset>('ALL');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
@@ -91,22 +84,88 @@ export function AdminKpiDashboard({
     startOverride?: string,
     endOverride?: string
   ) {
-    if (nextPreset === 'CUSTOM' && (!(startOverride ?? customStartDate) || !(endOverride ?? customEndDate))) { setPreset('CUSTOM'); return; }
-    requestRef.current?.abort();
-    const request=new AbortController(); requestRef.current=request;
-    const timeout=setTimeout(() => request.abort(),15000);
+    setPreset(nextPreset);
     setIsLoadingFilter(true);
+
     try {
-      const range=reportRange(nextPreset,new Date(),startOverride ?? customStartDate,endOverride ?? customEndDate);
-      const response=await fetch('/api/admin/analytics'+(range ? '?'+new URLSearchParams(range) : ''),{cache:'no-store',signal:request.signal});
-      const payload:unknown=await response.json();
-      if (requestRef.current!==request || request.signal.aborted) return;
-      const data=response.ok && isRecord(payload) ? parseAnalytics(payload.data) : null;
-      if (!data) throw new Error('KPI_UNAVAILABLE');
-      setUpdatedAt(new Date()); setPeakHours(data.peak); setFinancial(data.financial); setMenuAnalytics(data.menu); setKitchenKpi(data.kitchen); setWaitstaffKpi(data.staff);
-      setPreset(nextPreset); setFilterError(null);
-    } catch { if (requestRef.current===request) setFilterError('Không tải được báo cáo. Dữ liệu đang hiển thị chưa được cập nhật.'); }
-    finally { clearTimeout(timeout); if (requestRef.current===request) setIsLoadingFilter(false); }
+      if (nextPreset === 'ALL') {
+        const [finRes, menuRes, kitRes, staffRes] = await Promise.all([
+          supabase.from('vw_kpi_financial_summary').select('*').single(),
+          supabase.from('vw_kpi_menu_analytics').select('*'),
+          supabase.from('vw_kpi_kitchen_performance').select('*').single(),
+          supabase.from('vw_kpi_waitstaff_performance').select('*'),
+        ]);
+
+        if (finRes.data) setFinancial(finRes.data);
+        if (menuRes.data) setMenuAnalytics(menuRes.data);
+        if (kitRes.data) setKitchenKpi(kitRes.data);
+        if (staffRes.data) setWaitstaffKpi(staffRes.data);
+        return;
+      }
+
+      const now = new Date();
+      let startDate = new Date();
+      let endDate = new Date();
+
+      if (nextPreset === 'TODAY') {
+        startDate = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          0,
+          0,
+          0
+        );
+      } else if (nextPreset === 'THIS_WEEK') {
+        const day = now.getDay() || 7;
+        startDate = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() - day + 1,
+          0,
+          0,
+          0
+        );
+      } else if (nextPreset === 'THIS_MONTH') {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      } else if (nextPreset === 'CUSTOM') {
+        const s = startOverride ?? customStartDate;
+        const e = endOverride ?? customEndDate;
+        if (!s || !e) {
+          setIsLoadingFilter(false);
+          return;
+        }
+        startDate = new Date(`${s}T00:00:00`);
+        endDate = new Date(`${e}T23:59:59`);
+      }
+
+      const rpcArgs = {
+        p_start_date: startDate.toISOString(),
+        p_end_date: endDate.toISOString(),
+      };
+
+      const [finRpc, menuRpc, kitRpc, staffRpc] = await Promise.all([
+        supabase.rpc('fn_get_financial_kpi', rpcArgs),
+        supabase.rpc('fn_get_menu_kpi', rpcArgs),
+        supabase.rpc('fn_get_kitchen_kpi', rpcArgs),
+        supabase.rpc('fn_get_waitstaff_kpi', rpcArgs),
+      ]);
+
+      if (finRpc.data?.[0]) {
+        setFinancial(finRpc.data[0]);
+      }
+      if (menuRpc.data) {
+        setMenuAnalytics(menuRpc.data);
+      }
+      if (kitRpc.data?.[0]) {
+        setKitchenKpi(kitRpc.data[0]);
+      }
+      if (staffRpc.data) {
+        setWaitstaffKpi(staffRpc.data);
+      }
+    } finally {
+      setIsLoadingFilter(false);
+    }
   }
 
   // 11.1 Dữ liệu Biểu đồ tròn Tài chính & Khung giờ vàng
@@ -200,8 +259,6 @@ export function AdminKpiDashboard({
 
   return (
     <div className="space-y-8">
-      <p role="status" className="text-sm text-zinc-400">{updatedAt ? `Cập nhật: ${updatedAt.toLocaleString('vi-VN', {timeZone:'Asia/Ho_Chi_Minh'})}` : 'Dữ liệu tải khi mở trang'} · Giờ Việt Nam</p>
-      {filterError && <p role="alert" className="text-sm text-red-400">{filterError}</p>}
       {/* Header & Bộ lọc thời gian (Hôm nay / Tuần này / Tháng này / Tùy chọn) */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
         <div>
@@ -296,7 +353,7 @@ export function AdminKpiDashboard({
 
           <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800">
             <span className="text-xs font-medium text-zinc-400">
-              Giá vốn đã phục vụ & món đã chuẩn bị bị hủy
+              Giá vốn hàng bán (COGS)
             </span>
             <div className="text-2xl font-black text-zinc-100 mt-1">
               {formatVND(Number(financial.total_cogs))}
@@ -602,7 +659,7 @@ export function AdminKpiDashboard({
                       : 'bg-red-500/20 text-red-400'
                   )}
                 >
-                  {kitchenKpi.cook_time_evaluation === 'NO_DATA' ? 'Chưa có dữ liệu nấu' : kitchenKpi.cook_time_evaluation === 'ON_TIME'
+                  {kitchenKpi.cook_time_evaluation === 'ON_TIME'
                     ? 'Đạt chuẩn (<= chuẩn)'
                     : kitchenKpi.cook_time_evaluation === 'WARNING'
                     ? 'Hơi trễ (<30%)'

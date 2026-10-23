@@ -1,30 +1,26 @@
 'use client';
-import type { StaffDirectoryEntry as StaffProfileRow } from '@/lib/data/read-contracts';
-import { useListPage, LocalListNavigation } from '@/components/ui/LocalListNavigation';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { acknowledgeInventory, pendingInventory, submitInventory } from '@/lib/inventory/client';
+import { useState, useMemo } from 'react';
 import {
   AlertTriangle,
   Plus,
   ArrowDownCircle,
+  ArrowUpCircle,
   Trash2,
+  RotateCcw,
   Package,
   Search,
   Edit3,
   History,
   X,
 } from 'lucide-react';
-import { useMetadata } from '@/lib/metadata/use-metadata';
-import { pendingMetadata } from '@/lib/metadata/client';
-import { ingredientSnapshot } from '@/lib/metadata/contracts';
-import { MetadataFeedback } from './MetadataFeedback';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { formatVND, cn } from '@/lib/utils';
 import type {
   IngredientRow,
   InventoryLogRow,
   InventoryLogType,
+  StaffProfileRow,
 } from '@/types/database.types';
 
 interface InventoryManagerProps {
@@ -32,8 +28,6 @@ interface InventoryManagerProps {
   initialLogs: InventoryLogRow[];
   staffProfiles: StaffProfileRow[];
   currentStaffId: string | null;
-  remoteLogs?: boolean;
-  initialLogType?: InventoryLogType | 'ALL';
 }
 
 const LOG_TYPE_CONFIG: Record<
@@ -76,15 +70,8 @@ export function InventoryManager({
   initialLogs,
   staffProfiles,
   currentStaffId,
-  remoteLogs = false,
-  initialLogType = 'ALL',
 }: InventoryManagerProps) {
-  const metadata = useMetadata(currentStaffId);
-  const router = useRouter();
-  const submissionLock = useRef(false);
-  const [hasPending, setHasPending] = useState(false);
-  const [journalBlocked, setJournalBlocked] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const supabase = createSupabaseBrowserClient();
 
   const [ingredients, setIngredients] =
     useState<IngredientRow[]>(initialIngredients);
@@ -92,16 +79,10 @@ export function InventoryManager({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [onlyLowStock, setOnlyLowStock] = useState<boolean>(false);
   const [logFilterType, setLogFilterType] = useState<InventoryLogType | 'ALL'>(
-    initialLogType
+    'ALL'
   );
-  useEffect(() => { setLogFilterType(initialLogType); }, [initialLogType]);
-  function changeLogType(type: InventoryLogType | 'ALL') {
-    if (remoteLogs) router.push(`/admin/inventory?type=${type}`);
-    else setLogFilterType(type);
-  }
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [localBusy, setIsSubmitting] = useState<boolean>(false);
-  const isSubmitting = localBusy || metadata.busy;
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // State Modal Thêm / Sửa nguyên liệu (ingredients)
   const [isIngredientModalOpen, setIsIngredientModalOpen] =
@@ -110,59 +91,17 @@ export function InventoryManager({
     useState<IngredientRow | null>(null);
   const [ingName, setIngName] = useState<string>('');
   const [ingUnit, setIngUnit] = useState<string>('lon');
+  const [ingStock, setIngStock] = useState<string>('0');
   const [ingMinThreshold, setIngMinThreshold] = useState<string>('24');
   const [ingUnitCost, setIngUnitCost] = useState<string>('0');
 
   // State Modal Xuất / Nhập / Hủy kho (inventory_logs)
   const [isLogModalOpen, setIsLogModalOpen] = useState<boolean>(false);
   const [selectedIngredientId, setSelectedIngredientId] = useState<string>('');
-  const [logType, setLogType] = useState<'IMPORT' | 'WASTAGE'>('IMPORT');
+  const [logType, setLogType] = useState<InventoryLogType>('IMPORT');
   const [logQuantity, setLogQuantity] = useState<string>('1');
   const [logUnitCost, setLogUnitCost] = useState<string>('0');
   const [logNote, setLogNote] = useState<string>('');
-
-  useEffect(() => { setIngredients(initialIngredients); }, [initialIngredients]);
-  useEffect(() => { setLogs(initialLogs); }, [initialLogs]);
-  useEffect(() => {
-    setJournalBlocked(false);
-    setHasPending(false);
-    if (!currentStaffId) { setJournalBlocked(true); return; }
-    try { setHasPending(pendingInventory(currentStaffId) !== null); }
-    catch (error) {
-      setJournalBlocked(true);
-      setErrorMessage(error instanceof Error ? error.message : 'Không đọc được phiếu đang gửi.');
-    }
-  }, [currentStaffId]);
-
-  async function runInventory() {
-    if (submissionLock.current || metadata.busy || metadata.pending || journalBlocked || !currentStaffId) return;
-    submissionLock.current = true;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    setNotice(null);
-    try {
-      const common = { ingredientId: selectedIngredientId, quantity: Number(logQuantity), note: logNote };
-      const result = await submitInventory(currentStaffId, hasPending ? undefined : logType === 'IMPORT'
-        ? { ...common, type: 'IMPORT', unitCost: Number(logUnitCost) }
-        : { ...common, type: 'WASTAGE', unitCost: null });
-      acknowledgeInventory(currentStaffId, result.operationId);
-      setIsLogModalOpen(false);
-      setNotice(`Đã ghi phiếu kho ${result.quantityChange > 0 ? '+' : ''}${result.quantityChange}; giá trị ${formatVND(result.totalCost)}. Đang tải số liệu mới nhất.`);
-      // Refresh authoritative current rows, never replay an old stock snapshot into local state.
-      router.refresh();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Chưa xác nhận được phiếu kho.');
-    } finally {
-      try {
-        const pending = pendingInventory(currentStaffId) !== null;
-        setHasPending(pending);
-        if (pending) setIsLogModalOpen(false);
-      }
-      catch { setJournalBlocked(true); }
-      submissionLock.current = false;
-      setIsSubmitting(false);
-    }
-  }
 
   const staffNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -214,28 +153,27 @@ export function InventoryManager({
     });
   }, [ingredients, searchQuery, onlyLowStock]);
 
-  const ingredientPage = useListPage(filteredIngredients, `${searchQuery}:${onlyLowStock}`);
   const filteredLogs = useMemo(() => {
     if (logFilterType === 'ALL') return logs;
     return logs.filter((l) => l.type === logFilterType);
   }, [logs, logFilterType]);
 
   function openCreateIngredientModal() {
-    if (hasPending || journalBlocked || metadata.blocked || submissionLock.current) return;
     setEditingIngredient(null);
     setIngName('');
     setIngUnit('lon');
+    setIngStock('0');
     setIngMinThreshold('24');
-    setIngUnitCost('0');
+    setIngUnitCost('12000');
     setErrorMessage(null);
     setIsIngredientModalOpen(true);
   }
 
   function openEditIngredientModal(item: IngredientRow) {
-    if (hasPending || journalBlocked || metadata.blocked || submissionLock.current) return;
     setEditingIngredient(item);
     setIngName(item.name);
     setIngUnit(item.unit);
+    setIngStock(String(item.stock_quantity));
     setIngMinThreshold(String(item.min_threshold));
     setIngUnitCost(String(item.unit_cost));
     setErrorMessage(null);
@@ -244,9 +182,8 @@ export function InventoryManager({
 
   function openInventoryLogModal(
     ingredient?: IngredientRow,
-    defaultType: 'IMPORT' | 'WASTAGE' = 'IMPORT'
+    defaultType: InventoryLogType = 'IMPORT'
   ) {
-    if (hasPending || journalBlocked || metadata.blocked || submissionLock.current) return;
     const target = ingredient ?? ingredients[0];
     if (!target) {
       setErrorMessage('Vui lòng tạo ít nhất 1 nguyên liệu trước khi lập phiếu kho.');
@@ -263,10 +200,11 @@ export function InventoryManager({
 
   async function handleSaveIngredient(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isSubmitting || submissionLock.current || metadata.blocked || hasPending || journalBlocked) return;
+    if (isSubmitting) return;
 
     const trimmedName = ingName.trim();
     const trimmedUnit = ingUnit.trim();
+    const parsedStock = Number(ingStock);
     const parsedMinThreshold = Number(ingMinThreshold);
     const parsedUnitCost = Number(ingUnitCost);
 
@@ -276,8 +214,9 @@ export function InventoryManager({
     }
 
     if (
-      !Number.isFinite(parsedMinThreshold) ||
-      !Number.isFinite(parsedUnitCost) ||
+      Number.isNaN(parsedStock) ||
+      Number.isNaN(parsedMinThreshold) ||
+      Number.isNaN(parsedUnitCost) ||
       parsedMinThreshold < 0 ||
       parsedUnitCost < 0
     ) {
@@ -285,34 +224,168 @@ export function InventoryManager({
       return;
     }
 
-    submissionLock.current = true;
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
-      const item = { name: trimmedName, unit: trimmedUnit, min_threshold: parsedMinThreshold };
-      const confirmed = await metadata.run(editingIngredient
-        ? { resource: 'INGREDIENT', action: 'UPDATE', id: editingIngredient.id, item, expected: ingredientSnapshot(editingIngredient) }
-        : { resource: 'INGREDIENT', action: 'CREATE', id: crypto.randomUUID(), item, expected: null });
-      if (confirmed || (currentStaffId && pendingMetadata(currentStaffId))) setIsIngredientModalOpen(false);
+      if (editingIngredient) {
+        const { data, error } = await supabase
+          .from('ingredients')
+          .update({
+            name: trimmedName,
+            unit: trimmedUnit,
+            stock_quantity: parsedStock,
+            min_threshold: parsedMinThreshold,
+            unit_cost: parsedUnitCost,
+          })
+          .eq('id', editingIngredient.id)
+          .select('*')
+          .single();
+
+        if (error || !data) {
+          throw new Error(error?.message ?? 'Không thể cập nhật nguyên liệu');
+        }
+
+        setIngredients((prev) =>
+          prev.map((item) => (item.id === data.id ? data : item))
+        );
+      } else {
+        const { data, error } = await supabase
+          .from('ingredients')
+          .insert({
+            name: trimmedName,
+            unit: trimmedUnit,
+            stock_quantity: parsedStock,
+            min_threshold: parsedMinThreshold,
+            unit_cost: parsedUnitCost,
+          })
+          .select('*')
+          .single();
+
+        if (error || !data) {
+          throw new Error(error?.message ?? 'Không thể thêm nguyên liệu mới');
+        }
+
+        setIngredients((prev) => [data, ...prev]);
+      }
+
+      setIsIngredientModalOpen(false);
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Lỗi khi lưu nguyên liệu'
       );
     } finally {
-      submissionLock.current = false;
       setIsSubmitting(false);
     }
   }
 
   async function handleCreateInventoryLog(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    await runInventory();
+    if (isSubmitting) return;
+
+    const targetIngredient = ingredientById.get(selectedIngredientId);
+    if (!targetIngredient) {
+      setErrorMessage('Không tìm thấy nguyên liệu được chọn.');
+      return;
+    }
+
+    const rawQty = Number(logQuantity);
+    const parsedUnitCost = Number(logUnitCost);
+
+    if (Number.isNaN(rawQty) || rawQty <= 0) {
+      setErrorMessage('Số lượng xuất/nhập phải lớn hơn 0.');
+      return;
+    }
+
+    if (Number.isNaN(parsedUnitCost) || parsedUnitCost < 0) {
+      setErrorMessage('Đơn giá không hợp lệ.');
+      return;
+    }
+
+    const isAddition = LOG_TYPE_CONFIG[logType].isAddition;
+    const absQty = Math.abs(rawQty);
+    const signedQuantityChange = isAddition ? absQty : -absQty;
+    const newStockQuantity = Number(
+      (targetIngredient.stock_quantity + signedQuantityChange).toFixed(3)
+    );
+
+    if (!isAddition && newStockQuantity < 0) {
+      setErrorMessage(
+        `Không đủ tồn kho để trừ! Hiện còn ${targetIngredient.stock_quantity} ${targetIngredient.unit}.`
+      );
+      return;
+    }
+
+    const calculatedTotalCost = Math.round(absQty * parsedUnitCost);
+
+    // Đảm bảo created_by hợp lệ với FK staff_profiles.id (nếu chưa có trong bảng staff_profiles thì để null)
+    const validStaffId =
+      currentStaffId && staffNameById.has(currentStaffId)
+        ? currentStaffId
+        : null;
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      // 1. Tạo bản ghi lịch sử kho trong inventory_logs
+      const { data: insertedLog, error: logError } = await supabase
+        .from('inventory_logs')
+        .insert({
+          ingredient_id: targetIngredient.id,
+          type: logType,
+          quantity_change: signedQuantityChange,
+          total_cost: calculatedTotalCost,
+          note: logNote.trim() || null,
+          created_by: validStaffId,
+        })
+        .select('*')
+        .single();
+
+      if (logError || !insertedLog) {
+        throw new Error(logError?.message ?? 'Không thể ghi phiếu kho');
+      }
+
+      // 2. Tự động cộng/trừ stock_quantity trên bảng ingredients
+      const updatedUnitCost =
+        logType === 'IMPORT' && parsedUnitCost > 0
+          ? parsedUnitCost
+          : targetIngredient.unit_cost;
+
+      const { data: updatedIngredient, error: updateError } = await supabase
+        .from('ingredients')
+        .update({
+          stock_quantity: newStockQuantity,
+          unit_cost: updatedUnitCost,
+        })
+        .eq('id', targetIngredient.id)
+        .select('*')
+        .single();
+
+      if (updateError || !updatedIngredient) {
+        throw new Error(
+          updateError?.message ?? 'Không thể cập nhật số lượng tồn kho'
+        );
+      }
+
+      setIngredients((prev) =>
+        prev.map((item) =>
+          item.id === updatedIngredient.id ? updatedIngredient : item
+        )
+      );
+      setLogs((prev) => [insertedLog, ...prev]);
+      setIsLogModalOpen(false);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Lỗi khi thực hiện phiếu kho'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
     <div className="space-y-6">
-      <MetadataFeedback {...metadata} recover={() => metadata.run()} />
       {/* Header & Nút thao tác nhanh */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -320,7 +393,7 @@ export function InventoryManager({
             Quản lý Kho Nguyên liệu & Bia
           </h2>
           <p className="text-sm text-zinc-400 mt-1">
-            Nhập hàng và ghi nhận hủy hỏng. Xuất bán và trả bia được ghi qua đơn hàng.
+            Theo dõi định mức tồn kho thực tế, lập phiếu Nhập hàng, Xuất bán, Trả bia thừa và Hủy hàng hỏng.
           </p>
         </div>
 
@@ -328,34 +401,21 @@ export function InventoryManager({
           <button
             type="button"
             onClick={() => openInventoryLogModal(undefined, 'IMPORT')}
-            disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-            className="min-h-12 disabled:opacity-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-colors"
           >
             <ArrowDownCircle className="h-4 w-4" />
-            Nhập kho / Hủy hỏng
+            Lập phiếu Nhập / Xuất kho
           </button>
           <button
             type="button"
             onClick={openCreateIngredientModal}
-            disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-            className="min-h-12 disabled:opacity-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
           >
             <Plus className="h-4 w-4" />
             Thêm nguyên liệu mới
           </button>
         </div>
       </div>
-
-      {hasPending && (
-        <div role="status" className="rounded-xl border border-amber-500 p-4 space-y-2">
-          <p>Có phiếu kho chưa xác nhận. Kiểm tra phiếu này trước khi lập phiếu mới.</p>
-          <button type="button" disabled={isSubmitting} onClick={() => void runInventory()}
-            className="min-h-12 px-4 rounded-lg bg-amber-500 text-zinc-950 disabled:opacity-50">
-            {isSubmitting ? 'Đang kiểm tra...' : 'Kiểm tra phiếu vừa gửi'}
-          </button>
-        </div>
-      )}
-      {notice && <p role="status" className="text-emerald-400">{notice}</p>}
 
       {/* 4 Thẻ thống kê nhanh */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -398,7 +458,7 @@ export function InventoryManager({
 
         <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
           <div className="text-xs font-medium text-zinc-400">
-            Hao hụt trong trang phiếu đang xem (WASTAGE)
+            Chi phí hao hụt kho (WASTAGE)
           </div>
           <div className="text-2xl font-bold text-rose-400 mt-1">
             {formatVND(totalWastageValue)}
@@ -407,7 +467,7 @@ export function InventoryManager({
       </div>
 
       {errorMessage && (
-        <div role="alert" className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
@@ -473,7 +533,7 @@ export function InventoryManager({
                   </td>
                 </tr>
               ) : (
-                ingredientPage.pageItems.map((item) => {
+                filteredIngredients.map((item) => {
                   const isLowStock = item.stock_quantity <= item.min_threshold;
                   return (
                     <tr
@@ -531,10 +591,19 @@ export function InventoryManager({
                               openInventoryLogModal(item, 'IMPORT')
                             }
                             title="Nhập thêm hàng"
-                            disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-                            className="min-h-12 min-w-12 disabled:opacity-50 px-2.5 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-medium border border-emerald-500/30"
+                            className="px-2.5 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-medium border border-emerald-500/30"
                           >
                             + Nhập
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openInventoryLogModal(item, 'EXPORT_SALE')
+                            }
+                            title="Xuất kho"
+                            className="px-2.5 py-1.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-medium border border-amber-500/30"
+                          >
+                            - Xuất
                           </button>
                           <button
                             type="button"
@@ -542,8 +611,7 @@ export function InventoryManager({
                               openInventoryLogModal(item, 'WASTAGE')
                             }
                             title="Xuất hủy hàng hỏng"
-                            disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-                            className="min-h-12 min-w-12 disabled:opacity-50 px-2.5 py-1.5 rounded-md bg-red-500/15 hover:bg-red-500/25 text-red-300 text-xs font-medium border border-red-500/30"
+                            className="px-2.5 py-1.5 rounded-md bg-red-500/15 hover:bg-red-500/25 text-red-300 text-xs font-medium border border-red-500/30"
                           >
                             Hủy
                           </button>
@@ -566,7 +634,6 @@ export function InventoryManager({
         </div>
       </div>
 
-      <LocalListNavigation {...ingredientPage} label="Nguyên liệu" />
       {/* Bảng Lịch sử Xuất / Nhập / Hủy kho (inventory_logs) */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -584,7 +651,7 @@ export function InventoryManager({
               <button
                 key={typeKey}
                 type="button"
-                onClick={() => changeLogType(typeKey)}
+                onClick={() => setLogFilterType(typeKey)}
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                   logFilterType === typeKey
@@ -678,9 +745,9 @@ export function InventoryManager({
       {/* Modal 1: Thêm / Chỉnh sửa Nguyên liệu (ingredients) */}
       {isIngredientModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="ingredient-title" className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 id="ingredient-title" className="text-lg font-bold text-zinc-100">
+              <h3 className="text-lg font-bold text-zinc-100">
                 {editingIngredient
                   ? 'Chỉnh sửa Nguyên liệu'
                   : 'Thêm Nguyên liệu / Bia mới'}
@@ -688,7 +755,6 @@ export function InventoryManager({
               <button
                 type="button"
                 onClick={() => setIsIngredientModalOpen(false)}
-                aria-label="Đóng form nguyên liệu"
                 className="text-zinc-400 hover:text-zinc-100"
               >
                 <X className="h-5 w-5" />
@@ -696,90 +762,96 @@ export function InventoryManager({
             </div>
 
             <form onSubmit={handleSaveIngredient} className="space-y-4">
-              <fieldset disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked} className="space-y-4">
-                {metadata.error && <p role="alert" className="text-red-300">{metadata.error}</p>}
-                {errorMessage && <p role="alert" className="text-red-300">{errorMessage}</p>}
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Tên nguyên liệu / Bia *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={ingName}
+                  onChange={(e) => setIngName(e.target.value)}
+                  placeholder="VD: Bia Tiger Crystal, Ếch đồng tươi..."
+                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Tên nguyên liệu / Bia *
+                    Đơn vị tính *
                   </label>
                   <input
                     type="text"
                     required
-                    value={ingName}
-                    onChange={(e) => setIngName(e.target.value)}
-                    placeholder="VD: Bia Tiger Crystal, Ếch đồng tươi..."
+                    value={ingUnit}
+                    onChange={(e) => setIngUnit(e.target.value)}
+                    placeholder="lon, chai, kg, phần..."
                     className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                   />
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1">
-                      Đơn vị tính *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={ingUnit}
-                      onChange={(e) => setIngUnit(e.target.value)}
-                      placeholder="lon, chai, kg, phần..."
-                      className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1">
-                      Giá vốn hiện tại (đổi qua phiếu nhập)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      required
-                      value={ingUnitCost}
-                      disabled
-                      onChange={(e) => setIngUnitCost(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    Giá vốn / 1 đơn vị (VNĐ) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    required
+                    value={ingUnitCost}
+                    onChange={(e) => setIngUnitCost(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  />
                 </div>
+              </div>
 
-                <p className="text-xs text-zinc-400">Nguyên liệu mới có tồn và giá vốn bằng 0. Dùng phiếu nhập để ghi nhận hàng và giá vốn, giữ đủ lịch sử kho.</p>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1">
-                      Mức cảnh báo tối thiểu *
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      required
-                      value={ingMinThreshold}
-                      onChange={(e) => setIngMinThreshold(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                    />
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    Số lượng tồn ban đầu
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={ingStock}
+                    onChange={(e) => setIngStock(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  />
                 </div>
-
-                <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => setIsIngredientModalOpen(false)}
-                    className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
-                  >
-                    Hủy
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-                    className="min-h-12 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-semibold"
-                  >
-                    {isSubmitting ? 'Đang lưu...' : 'Lưu nguyên liệu'}
-                  </button>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    Mức cảnh báo tối thiểu *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    value={ingMinThreshold}
+                    onChange={(e) => setIngMinThreshold(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  />
                 </div>
-              </fieldset>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsIngredientModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-semibold"
+                >
+                  {isSubmitting ? 'Đang lưu...' : 'Lưu nguyên liệu'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -788,15 +860,14 @@ export function InventoryManager({
       {/* Modal 2: Lập phiếu Nhập / Xuất / Trả bia / Hủy kho (inventory_logs) */}
       {isLogModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="inventory-title" className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 id="inventory-title" className="text-lg font-bold text-zinc-100">
-                Nhập kho / Hủy hỏng
+              <h3 className="text-lg font-bold text-zinc-100">
+                Lập phiếu Nhập / Xuất / Hủy kho
               </h3>
               <button
                 type="button"
                 onClick={() => setIsLogModalOpen(false)}
-                aria-label="Đóng phiếu kho"
                 className="text-zinc-400 hover:text-zinc-100"
               >
                 <X className="h-5 w-5" />
@@ -804,156 +875,150 @@ export function InventoryManager({
             </div>
 
             <form onSubmit={handleCreateInventoryLog} className="space-y-4">
-              <fieldset disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked} className="space-y-4">
-                {errorMessage && <p role="alert" className="text-red-300">{errorMessage}</p>}
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                  Loại giao dịch kho *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      {
+                        type: 'IMPORT',
+                        icon: ArrowDownCircle,
+                      },
+                      {
+                        type: 'EXPORT_SALE',
+                        icon: ArrowUpCircle,
+                      },
+                      {
+                        type: 'RETURN_BEER',
+                        icon: RotateCcw,
+                      },
+                      {
+                        type: 'WASTAGE',
+                        icon: Trash2,
+                      },
+                    ] as const
+                  ).map(({ type, icon: Icon }) => {
+                    const cfg = LOG_TYPE_CONFIG[type];
+                    const active = logType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setLogType(type)}
+                        className={cn(
+                          'flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-medium transition-all',
+                          active
+                            ? cfg.badgeClass + ' ring-1 ring-current'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span>{cfg.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1.5">
+                  {LOG_TYPE_CONFIG[logType].description}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Chọn nguyên liệu / Bia *
+                </label>
+                <select
+                  value={selectedIngredientId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedIngredientId(id);
+                    const ing = ingredientById.get(id);
+                    if (ing) {
+                      setLogUnitCost(String(ing.unit_cost));
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                >
+                  {ingredients.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} (Tồn: {item.stock_quantity} {item.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                    Loại giao dịch kho *
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        {
-                          type: 'IMPORT',
-                          icon: ArrowDownCircle,
-                        },
-                        {
-                          type: 'WASTAGE',
-                          icon: Trash2,
-                        },
-                      ] as const
-                    ).map(({ type, icon: Icon }) => {
-                      const cfg = LOG_TYPE_CONFIG[type];
-                      const active = logType === type;
-                      return (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => setLogType(type)}
-                          className={cn(
-                            'min-h-12 flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-medium transition-all',
-                            active
-                              ? cfg.badgeClass + ' ring-1 ring-current'
-                              : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                          )}
-                        >
-                          <Icon className="h-4 w-4 shrink-0" />
-                          <span>{cfg.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[11px] text-zinc-400 mt-1.5">
-                    {LOG_TYPE_CONFIG[logType].description}
-                  </p>
-                </div>
-
-                <div>
-                  <label htmlFor="inventory-ingredient" className="block text-xs font-medium text-zinc-300 mb-1">
-                    Chọn nguyên liệu / Bia *
-                  </label>
-                  <select
-                    id="inventory-ingredient"
-                    value={selectedIngredientId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedIngredientId(id);
-                      const ing = ingredientById.get(id);
-                      if (ing) {
-                        setLogUnitCost(String(ing.unit_cost));
-                      }
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                  >
-                    {ingredients.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} (Tồn: {item.stock_quantity} {item.unit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="inventory-quantity" className="block text-xs font-medium text-zinc-300 mb-1">
-                      Số lượng ({ingredientById.get(selectedIngredientId)?.unit ?? 'đơn vị'}) *
-                    </label>
-                    <input
-                      id="inventory-quantity"
-                      type="number"
-                      min="0.001"
-                      max="1000000"
-                      step="0.001"
-                      required
-                      value={logQuantity}
-                      onChange={(e) => setLogQuantity(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="inventory-cost" className="block text-xs font-medium text-zinc-300 mb-1">
-                      Đơn giá vốn (VNĐ) *
-                    </label>
-                    <input
-                      id="inventory-cost"
-                      type="number"
-                      min="0"
-                      max="1000000000"
-                      step="0.01"
-                      required
-                      value={logUnitCost}
-                      disabled={logType === 'WASTAGE'}
-                      onChange={(e) => setLogUnitCost(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                    />
-                  </div>
-                </div>
-
-                {logType === 'WASTAGE' && <p className="text-xs text-zinc-400">Giá trị hủy dùng giá vốn hiện tại ở kho khi xác nhận; không nhập tay.</p>}
-
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-between text-xs">
-                    <span className="text-zinc-400">Giá trị dự kiến:</span>
-                  <span className="font-bold text-sm text-amber-400">
-                    {formatVND(
-                      Math.max(0, Number(logQuantity) || 0) *
-                        Math.max(0, logType === 'WASTAGE' ? ingredientById.get(selectedIngredientId)?.unit_cost ?? 0 : Number(logUnitCost) || 0)
-                    )}
-                  </span>
-                </div>
-
-                <div>
-                  <label htmlFor="inventory-note" className="block text-xs font-medium text-zinc-300 mb-1">
-                    {logType === 'WASTAGE' ? 'Lý do hủy hỏng *' : 'Ghi chú phiếu kho'}
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    Số lượng ({ingredientById.get(selectedIngredientId)?.unit ?? 'đơn vị'}) *
                   </label>
                   <input
-                    id="inventory-note"
-                    type="text"
-                    maxLength={500}
-                    required={logType === 'WASTAGE'}
-                    value={logNote}
-                    onChange={(e) => setLogNote(e.target.value)}
-                    placeholder="VD: Nhập 10 két Tiger từ đại lý Hải Sơn..."
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                    value={logQuantity}
+                    onChange={(e) => setLogQuantity(e.target.value)}
                     className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                   />
                 </div>
-
-                <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => setIsLogModalOpen(false)}
-                    className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
-                  >
-                    Hủy
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || metadata.blocked || hasPending || journalBlocked}
-                    className="min-h-12 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold"
-                  >
-                    {isSubmitting ? 'Đang xử lý...' : 'Xác nhận & Cập nhật tồn kho'}
-                  </button>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                    Đơn giá vốn (VNĐ) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    required
+                    value={logUnitCost}
+                    onChange={(e) => setLogUnitCost(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  />
                 </div>
-              </fieldset>
+              </div>
+
+              <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-between text-xs">
+                <span className="text-zinc-400">Tổng giá trị phiếu:</span>
+                <span className="font-bold text-sm text-amber-400">
+                  {formatVND(
+                    Math.max(0, Number(logQuantity) || 0) *
+                      Math.max(0, Number(logUnitCost) || 0)
+                  )}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Ghi chú phiếu kho
+                </label>
+                <input
+                  type="text"
+                  value={logNote}
+                  onChange={(e) => setLogNote(e.target.value)}
+                  placeholder="VD: Nhập 10 két Tiger từ đại lý Hải Sơn..."
+                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsLogModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold"
+                >
+                  {isSubmitting ? 'Đang xử lý...' : 'Xác nhận & Cập nhật tồn kho'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

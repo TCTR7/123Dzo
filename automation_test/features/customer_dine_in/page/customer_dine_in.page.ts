@@ -12,7 +12,7 @@ export class CustomerDineInPage extends BasePage {
   }
 
   getKitchenProgressTab(): Locator {
-    return this.page.getByRole('button', { name: /Món đã gọi/i });
+    return this.page.getByRole('button', { name: /Tiến độ Bếp/i });
   }
 
   getBillSplitTab(): Locator {
@@ -24,7 +24,7 @@ export class CustomerDineInPage extends BasePage {
   }
 
   getSearchInput(): Locator {
-    return this.page.getByRole('searchbox', { name: 'Tìm món' });
+    return this.page.getByPlaceholder(/Tìm mồi nhậu, bia, đồ uống/i);
   }
 
   getCategoryButton(label: 'Tất cả' | 'Mồi nhậu' | 'Bia' | 'Đồ uống' | 'Khác'): Locator {

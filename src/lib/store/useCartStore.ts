@@ -1,58 +1,192 @@
 'use client';
+
 import { create } from 'zustand';
-import { persist,createJSONStorage } from 'zustand/middleware';
-import { migrateCartLines,type CartLine } from '@/lib/customer/cart-lines';
-import type { OrderLine } from '@/lib/orders/contracts';
-export type CartItem=CartLine;
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type { MenuCategory, StationType } from '@/types/database.types';
+
+export interface CartItem {
+  menu_item_id: string;
+  name: string;
+  category: MenuCategory;
+  station: StationType;
+  unit_price: number;
+  unit_cost_price: number;
+  image_url: string | null;
+  quantity: number;
+  note: string;
+}
+
 interface CartState {
- sessionToken:string|null; items:CartLine[]; submissionTimestamps:number[]; acceptedOperationIds:string[];
- setSessionToken:(token:string)=>void;
- addItem:(item:Omit<CartLine,'lineId'|'quantity'|'note'>&{quantity?:number;note?:string})=>void;
- updateQuantity:(lineId:string,quantity:number)=>void;
- updateNote:(lineId:string,note:string)=>void;
- removeItem:(lineId:string)=>void; clearCart:()=>void;
- getTotalQuantity:()=>number;getTotalAmount:()=>number;canSubmitOrder:()=>boolean;recordOrderSubmission:()=>void;
- acceptSubmittedOrder:(operationId:string,lines:OrderLine[])=>void;
+  sessionToken: string | null;
+  items: CartItem[];
+  submissionTimestamps: number[];
+  setSessionToken: (token: string) => void;
+  addItem: (
+    item: Omit<CartItem, 'quantity' | 'note'> & {
+      quantity?: number;
+      note?: string;
+    }
+  ) => void;
+  updateQuantity: (menuItemId: string, quantity: number, note?: string) => void;
+  updateNote: (menuItemId: string, note: string) => void;
+  removeItem: (menuItemId: string, note?: string) => void;
+  clearCart: () => void;
+  getTotalQuantity: () => number;
+  getTotalAmount: () => number;
+  canSubmitOrder: () => boolean;
+  recordOrderSubmission: () => void;
 }
-function safeState(value:unknown) {
- const v=value && typeof value==='object'?value as Record<string,unknown>:{};
- return {sessionToken:typeof v.sessionToken==='string'?v.sessionToken:null,items:migrateCartLines(v.items),
- submissionTimestamps:Array.isArray(v.submissionTimestamps)?v.submissionTimestamps.filter((n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)).slice(-2):[],
- acceptedOperationIds:Array.isArray(v.acceptedOperationIds)?v.acceptedOperationIds.filter((n:unknown):n is string=>typeof n==='string').slice(-100):[]};
-}
-function createCartStore(name:string) {
- return create<CartState>()(persist((set,get)=>({sessionToken:null,items:[],submissionTimestamps:[],acceptedOperationIds:[],
- setSessionToken:token=>set(state=>state.sessionToken===token?state:state.sessionToken===null?{sessionToken:token}:{sessionToken:token,items:[],submissionTimestamps:[],acceptedOperationIds:[]}),
- addItem:incoming=>{
-  const quantity=incoming.quantity??1,note=(incoming.note??'').trim().slice(0,500);
-  if(!Number.isInteger(quantity)||quantity<1||quantity>99||!Number.isFinite(incoming.unit_price)||incoming.unit_price<0)return;
-  set(state=>{
-   const found=state.items.find(item=>item.menu_item_id===incoming.menu_item_id&&item.note===note&&item.unit_price===incoming.unit_price);
-   if(found)return {items:state.items.map(item=>item.lineId===found.lineId?{...item,quantity:Math.min(99,item.quantity+quantity)}:item)};
-   if(state.items.length>=30)return state;
-   return {items:[...state.items,{...incoming,lineId:crypto.randomUUID(),quantity,note}]};
-  });
- },
- updateQuantity:(lineId,quantity)=>{
-  if(!Number.isInteger(quantity)||quantity>99)return;
-  set(state=>({items:quantity<=0?state.items.filter(i=>i.lineId!==lineId):state.items.map(i=>i.lineId===lineId?{...i,quantity}:i)}));
- },
- updateNote:(lineId,note)=>set(state=>({items:state.items.map(i=>i.lineId===lineId?{...i,note:note.slice(0,500)}:i)})),
- removeItem:lineId=>set(state=>({items:state.items.filter(i=>i.lineId!==lineId)})),clearCart:()=>set({items:[]}),
- getTotalQuantity:()=>get().items.reduce((sum,i)=>sum+i.quantity,0),getTotalAmount:()=>get().items.reduce((sum,i)=>sum+i.quantity*i.unit_price,0),
- canSubmitOrder:()=>get().submissionTimestamps.filter(ts=>Date.now()-ts<10000).length<2,
- recordOrderSubmission:()=>set(state=>({submissionTimestamps:[...state.submissionTimestamps.filter(ts=>Date.now()-ts<10000),Date.now()]})),
- acceptSubmittedOrder:(operationId,lines)=>set(state=>{
-  if(state.acceptedOperationIds.includes(operationId))return state;
-  let items=state.items.map(i=>({...i}));
-  for(const line of lines){let remaining=line.quantity;items=items.map(item=>{
-   if(remaining<=0||item.menu_item_id!==line.menu_item_id||item.note.trim()!==line.note||item.unit_price!==line.expected_price)return item;
-   const accepted=Math.min(remaining,item.quantity);remaining-=accepted;return {...item,quantity:item.quantity-accepted};
-  }).filter(i=>i.quantity>0);}
-  return {items,acceptedOperationIds:[...state.acceptedOperationIds,operationId].slice(-100)};
- }),
- }),{name,version:2,storage:createJSONStorage(()=>localStorage),migrate:value=>safeState(value),
- merge:(persisted,current)=>({...current,...safeState(persisted)})}));
-}
-export const useCartStore=createCartStore('123dzo-customer-cart-storage');
-export const useTakeawayCartStore=createCartStore('123dzo-takeaway-cart-storage');
+
+const RATE_LIMIT_WINDOW_MS = 10_000; // 10 giây
+const MAX_SUBMISSIONS_PER_WINDOW = 2; // Tối đa 2 lượt đặt món / 10 giây (Mục 6.5 PRD_SPEC.md)
+
+export const useCartStore = create<CartState>()(
+  persist(
+    (set, get) => ({
+      sessionToken: null,
+      items: [],
+      submissionTimestamps: [],
+
+      setSessionToken: (token: string) => {
+        const currentToken = get().sessionToken;
+        if (currentToken && currentToken !== token) {
+          // Nếu khách quét sang mã QR của phiên bàn mới, làm sạch giỏ hàng cũ
+          set({
+            sessionToken: token,
+            items: [],
+            submissionTimestamps: [],
+          });
+        } else if (!currentToken) {
+          set({ sessionToken: token });
+        }
+      },
+
+      addItem: (incoming) => {
+        const addQty = incoming.quantity ?? 1;
+        const normalizedNote = (incoming.note ?? '').trim();
+        if (addQty <= 0) return;
+
+        set((state) => {
+          const existingIndex = state.items.findIndex(
+            (i) =>
+              i.menu_item_id === incoming.menu_item_id &&
+              i.note === normalizedNote
+          );
+
+          if (existingIndex > -1) {
+            const updated = [...state.items];
+            const current = updated[existingIndex];
+            if (current) {
+              updated[existingIndex] = {
+                ...current,
+                quantity: current.quantity + addQty,
+              };
+            }
+            return { items: updated };
+          }
+
+          return {
+            items: [
+              ...state.items,
+              {
+                menu_item_id: incoming.menu_item_id,
+                name: incoming.name,
+                category: incoming.category,
+                station: incoming.station,
+                unit_price: incoming.unit_price,
+                unit_cost_price: incoming.unit_cost_price,
+                image_url: incoming.image_url,
+                quantity: addQty,
+                note: normalizedNote,
+              },
+            ],
+          };
+        });
+      },
+
+      updateQuantity: (menuItemId: string, quantity: number, note?: string) => {
+        set((state) => {
+          const targetNote = note !== undefined ? note.trim() : undefined;
+          if (quantity <= 0) {
+            return {
+              items: state.items.filter(
+                (i) =>
+                  !(
+                    i.menu_item_id === menuItemId &&
+                    (targetNote === undefined || i.note === targetNote)
+                  )
+              ),
+            };
+          }
+
+          return {
+            items: state.items.map((i) =>
+              i.menu_item_id === menuItemId &&
+              (targetNote === undefined || i.note === targetNote)
+                ? { ...i, quantity }
+                : i
+            ),
+          };
+        });
+      },
+
+      updateNote: (menuItemId: string, note: string) => {
+        set((state) => ({
+          items: state.items.map((i) =>
+            i.menu_item_id === menuItemId ? { ...i, note } : i
+          ),
+        }));
+      },
+
+      removeItem: (menuItemId: string, note?: string) => {
+        set((state) => {
+          const targetNote = note !== undefined ? note.trim() : undefined;
+          return {
+            items: state.items.filter(
+              (i) =>
+                !(
+                  i.menu_item_id === menuItemId &&
+                  (targetNote === undefined || i.note === targetNote)
+                )
+            ),
+          };
+        });
+      },
+
+      clearCart: () => set({ items: [] }),
+
+      getTotalQuantity: () =>
+        get().items.reduce((sum, item) => sum + item.quantity, 0),
+
+      getTotalAmount: () =>
+        get().items.reduce(
+          (sum, item) => sum + item.unit_price * item.quantity,
+          0
+        ),
+
+      canSubmitOrder: () => {
+        const now = Date.now();
+        const recent = get().submissionTimestamps.filter(
+          (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+        );
+        return recent.length < MAX_SUBMISSIONS_PER_WINDOW;
+      },
+
+      recordOrderSubmission: () => {
+        const now = Date.now();
+        set((state) => ({
+          submissionTimestamps: [
+            ...state.submissionTimestamps.filter(
+              (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+            ),
+            now,
+          ],
+        }));
+      },
+    }),
+    {
+      name: '123dzo-customer-cart-storage',
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+);

@@ -19,6 +19,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'BEER',
       station: 'BAR_INSTANT',
       unit_price: 22000,
+      unit_cost_price: 15000,
       image_url: null,
       quantity: 5,
       note: 'Ướp lạnh',
@@ -30,6 +31,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'BEER',
       station: 'BAR_INSTANT',
       unit_price: 22000,
+      unit_cost_price: 15000,
       image_url: null,
       quantity: 3,
       note: 'Ướp lạnh',
@@ -51,6 +53,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'FOOD',
       station: 'KITCHEN',
       unit_price: 120000,
+      unit_cost_price: 65000,
       image_url: null,
       quantity: 1,
       note: 'Cay nhiều',
@@ -62,6 +65,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'FOOD',
       station: 'KITCHEN',
       unit_price: 120000,
+      unit_cost_price: 65000,
       image_url: null,
       quantity: 1,
       note: 'Không cay',
@@ -79,19 +83,20 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'FOOD',
       station: 'KITCHEN',
       unit_price: 150000,
+      unit_cost_price: 80000,
       image_url: null,
       quantity: 1,
       note: 'Chín vừa',
     });
 
-    useCartStore.getState().updateQuantity(useCartStore.getState().items[0]!.lineId, 3);
+    useCartStore.getState().updateQuantity('bo-luc-lac-01', 3, 'Chín vừa');
     expect(useCartStore.getState().items[0]?.quantity).toBe(3);
 
-    useCartStore.getState().updateNote(useCartStore.getState().items[0]!.lineId, 'Thêm tiêu xanh');
+    useCartStore.getState().updateNote('bo-luc-lac-01', 'Thêm tiêu xanh');
     expect(useCartStore.getState().items[0]?.note).toBe('Thêm tiêu xanh');
 
     // Giảm số lượng về 0 sẽ tự động xóa khỏi giỏ hàng
-    useCartStore.getState().updateQuantity(useCartStore.getState().items[0]!.lineId, 0);
+    useCartStore.getState().updateQuantity('bo-luc-lac-01', 0, 'Thêm tiêu xanh');
     expect(useCartStore.getState().items).toHaveLength(0);
   });
 
@@ -104,11 +109,12 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'OTHER',
       station: 'BAR_INSTANT',
       unit_price: 3000,
+      unit_cost_price: 1000,
       image_url: null,
       quantity: 4,
     });
 
-    useCartStore.getState().removeItem(useCartStore.getState().items[0]!.lineId);
+    useCartStore.getState().removeItem('khan-lanh-01');
     expect(useCartStore.getState().items).toHaveLength(0);
 
     store.addItem({
@@ -117,6 +123,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'DRINK',
       station: 'BAR_INSTANT',
       unit_price: 10000,
+      unit_cost_price: 4000,
       image_url: null,
       quantity: 2,
     });
@@ -134,6 +141,7 @@ describe('Unit Test: useCartStore (Giỏ hàng Khách tại bàn & Rate Limit - 
       category: 'FOOD',
       station: 'KITCHEN',
       unit_price: 250000,
+      unit_cost_price: 130000,
       image_url: null,
       quantity: 1,
     });

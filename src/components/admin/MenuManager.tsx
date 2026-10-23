@@ -1,11 +1,6 @@
 'use client';
-import { useListPage, LocalListNavigation } from '@/components/ui/LocalListNavigation';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { pendingMenuAction } from '@/lib/menu/client';
-import { useMenuActions } from '@/lib/menu/use-menu-actions';
-import { menuSnapshot } from '@/lib/menu/contracts';
-import { MenuActionFeedback } from './MenuActionFeedback';
+import { useState, useMemo } from 'react';
 import {
   UtensilsCrossed,
   Plus,
@@ -21,7 +16,7 @@ import {
   Link2,
   X,
 } from 'lucide-react';
-import { uploadMenuImage, cleanupMenuImages } from '@/lib/menu-images/client';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { compressMenuImageToWebP, formatVND, cn } from '@/lib/utils';
 import type {
   IngredientRow,
@@ -31,7 +26,6 @@ import type {
 } from '@/types/database.types';
 
 interface MenuManagerProps {
-  currentStaffId: string;
   initialMenuItems: MenuItemRow[];
   ingredients: IngredientRow[];
 }
@@ -75,17 +69,15 @@ const STATION_LABELS: Record<
   },
 };
 
+const MENU_STORAGE_BUCKET = 'menu-images';
 
 export function MenuManager({
   initialMenuItems,
-  currentStaffId,
   ingredients,
 }: MenuManagerProps) {
-  const imageLock = useRef(false);
-  const menuActions = useMenuActions(currentStaffId);
+  const supabase = createSupabaseBrowserClient();
 
   const [menuItems, setMenuItems] = useState<MenuItemRow[]>(initialMenuItems);
-  useEffect(() => { setMenuItems(initialMenuItems); }, [initialMenuItems]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<MenuCategory | 'ALL'>(
     'ALL'
@@ -94,7 +86,8 @@ export function MenuManager({
     'ALL'
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const isSubmitting = menuActions.busy;
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   // State Modal Thêm / Sửa Món ăn (menu_items)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -102,8 +95,8 @@ export function MenuManager({
   const [name, setName] = useState<string>('');
   const [category, setCategory] = useState<MenuCategory>('FOOD');
   const [station, setStation] = useState<StationType>('KITCHEN');
-  const [price, setPrice] = useState<string>('');
-  const [costPrice, setCostPrice] = useState<string>('');
+  const [price, setPrice] = useState<string>('69000');
+  const [costPrice, setCostPrice] = useState<string>('30000');
   const [prepTimeMinutes, setPrepTimeMinutes] = useState<string>('10');
   const [imageUrl, setImageUrl] = useState<string>('');
   const [isAvailable, setIsAvailable] = useState<boolean>(true);
@@ -111,7 +104,6 @@ export function MenuManager({
 
   // State nén ảnh WebP < 80KB & Upload lên Supabase Storage
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
-  const [imageNotice, setImageNotice] = useState<string | null>(null);
   const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
 
   const ingredientById = useMemo(() => {
@@ -133,17 +125,14 @@ export function MenuManager({
     });
   }, [menuItems, searchQuery, categoryFilter, stationFilter]);
 
-  const listPage = useListPage(filteredItems, `${searchQuery}:${categoryFilter}:${stationFilter}`);
-
   function openCreateModal() {
-    if (imageLock.current || menuActions.blocked) return;
     setEditingItem(null);
     setName('');
     setCategory('FOOD');
     setStation('KITCHEN');
-    setPrice('');
-    setCostPrice('');
-    setPrepTimeMinutes('10');
+    setPrice('79000');
+    setCostPrice('35000');
+    setPrepTimeMinutes('12');
     setImageUrl('');
     setIsAvailable(true);
     setLinkedIngredientId('');
@@ -153,7 +142,6 @@ export function MenuManager({
   }
 
   function openEditModal(item: MenuItemRow) {
-    if (imageLock.current || menuActions.blocked) return;
     setEditingItem(item);
     setName(item.name);
     setCategory(item.category);
@@ -176,44 +164,98 @@ export function MenuManager({
   async function handleImageFileChange(
     e: React.ChangeEvent<HTMLInputElement>
   ) {
-    const input = e.currentTarget;
-    const rawFile = input.files?.[0];
-    if (!rawFile || imageLock.current || menuActions.blocked) return;
-    imageLock.current = true;
-    setIsUploadingImage(true); setErrorMessage(null); setCompressionInfo(null);
-    try {
-      const compressed = await compressMenuImageToWebP(rawFile);
-      const uploaded = await uploadMenuImage(compressed);
-      setImageUrl(uploaded.url);
-      setCompressionInfo(`${(rawFile.size / 1024).toFixed(1)}KB -> ${(compressed.size / 1024).toFixed(1)}KB`);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Chưa xác nhận ảnh tải lên. Vui lòng chọn lại ảnh.');
-    } finally {
-      input.value = ''; imageLock.current = false; setIsUploadingImage(false);
-    }
-  }
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
-  async function handleCleanupImages() {
-    if (imageLock.current || menuActions.blocked) return;
-    imageLock.current = true; setIsUploadingImage(true); setImageNotice(null); setErrorMessage(null);
+    setIsUploadingImage(true);
+    setErrorMessage(null);
+    setCompressionInfo(null);
+
     try {
-      const result = await cleanupMenuImages();
-      setImageNotice(`Đã dọn ${result.removed} ảnh không dùng; ${result.failed} ảnh cần kiểm tra lại.`);
-    } catch (error) { setErrorMessage(error instanceof Error ? error.message : 'Chưa xác nhận kết quả dọn ảnh.'); }
-    finally { imageLock.current = false; setIsUploadingImage(false); }
+      const originalKb = (rawFile.size / 1024).toFixed(1);
+      const compressedWebpFile = await compressMenuImageToWebP(rawFile);
+      const compressedKb = (compressedWebpFile.size / 1024).toFixed(1);
+
+      if (compressedWebpFile.size > 80 * 1024) {
+        throw new Error(
+          `Ảnh sau khi nén (${compressedKb}KB) vẫn vượt ngưỡng 80KB. Vui lòng chọn ảnh khác.`
+        );
+      }
+
+      const uniqueFileName = `menu_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}.webp`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(MENU_STORAGE_BUCKET)
+        .upload(uniqueFileName, compressedWebpFile, {
+          contentType: 'image/webp',
+          cacheControl: '31536000',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        throw new Error(
+          `Lỗi tải ảnh lên Supabase Storage (${MENU_STORAGE_BUCKET}): ${uploadError.message}`
+        );
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from(MENU_STORAGE_BUCKET)
+        .getPublicUrl(uniqueFileName);
+
+      setImageUrl(publicUrlData.publicUrl);
+      setCompressionInfo(
+        `Đã nén chuẩn WebP: ${originalKb}KB → ${compressedKb}KB (< 80KB)`
+      );
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Không thể nén và tải ảnh lên'
+      );
+    } finally {
+      setIsUploadingImage(false);
+    }
   }
 
   /**
    * Nút gạt "Tạm hết hàng (86ing)" cập nhật tức thì cột is_available trên bảng menu_items
    */
   async function handleToggleAvailability(item: MenuItemRow) {
-    if (menuActions.blocked || isUploadingImage || imageLock.current) return;
-    await menuActions.run({ action: 'AVAILABILITY', id: item.id, item: { is_available: !item.is_available }, expected: { is_available: item.is_available } });
+    if (togglingId === item.id) return;
+    setTogglingId(item.id);
+    setErrorMessage(null);
+
+    const nextAvailable = !item.is_available;
+
+    try {
+      const { data, error } = await supabase
+        .from('menu_items')
+        .update({ is_available: nextAvailable })
+        .eq('id', item.id)
+        .select('*')
+        .single();
+
+      if (error || !data) {
+        throw new Error(
+          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng (86ing)'
+        );
+      }
+
+      setMenuItems((prev) =>
+        prev.map((m) => (m.id === data.id ? data : m))
+      );
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Lỗi khi bật/tắt trạng thái món'
+      );
+    } finally {
+      setTogglingId(null);
+    }
   }
 
   async function handleSaveMenuItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (menuActions.blocked || isUploadingImage || imageLock.current) return;
+    if (isSubmitting || isUploadingImage) return;
 
     const trimmedName = name.trim();
     const parsedPrice = Number(price);
@@ -237,6 +279,7 @@ export function MenuManager({
       return;
     }
 
+    setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
@@ -246,34 +289,78 @@ export function MenuManager({
         station,
         price: parsedPrice,
         cost_price: parsedCostPrice,
-        prep_time_minutes: parsedPrepTime,
+        prep_time_minutes: Math.round(parsedPrepTime),
         image_url: imageUrl.trim() || null,
         is_available: isAvailable,
         linked_ingredient_id: linkedIngredientId || null,
       };
 
-      const confirmed = await menuActions.run(editingItem
-        ? { action: 'UPDATE', id: editingItem.id, item: payload, expected: menuSnapshot(editingItem) }
-        : { action: 'CREATE', id: crypto.randomUUID(), item: payload, expected: null });
-      if (confirmed || pendingMenuAction(currentStaffId)) setIsModalOpen(false);
+      if (editingItem) {
+        const { data, error } = await supabase
+          .from('menu_items')
+          .update(payload)
+          .eq('id', editingItem.id)
+          .select('*')
+          .single();
+
+        if (error || !data) {
+          throw new Error(error?.message ?? 'Không thể cập nhật món ăn');
+        }
+
+        setMenuItems((prev) =>
+          prev.map((item) => (item.id === data.id ? data : item))
+        );
+      } else {
+        const { data, error } = await supabase
+          .from('menu_items')
+          .insert(payload)
+          .select('*')
+          .single();
+
+        if (error || !data) {
+          throw new Error(error?.message ?? 'Không thể tạo món ăn mới');
+        }
+
+        setMenuItems((prev) => [data, ...prev]);
+      }
+
+      setIsModalOpen(false);
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Thông tin thực đơn không hợp lệ.');
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Lỗi khi lưu món ăn'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
-  async function handleDeleteMenuItem(item: MenuItemRow) {
-    if (menuActions.blocked || isUploadingImage || imageLock.current) return;
-    await menuActions.run({ action: 'DELETE', id: item.id, item: null, expected: menuSnapshot(item) });
+  async function handleDeleteMenuItem(itemId: string) {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      const { error } = await supabase
+        .from('menu_items')
+        .delete()
+        .eq('id', itemId);
+
+      if (error) {
+        throw new Error(
+          `Không thể xóa món ăn (có thể đã phát sinh đơn hàng): ${error.message}`
+        );
+      }
+
+      setMenuItems((prev) => prev.filter((item) => item.id !== itemId));
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi xóa món');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
     <div className="space-y-6">
-      <MenuActionFeedback {...menuActions} recover={() => menuActions.run()} />
-      <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-400">
-        <button type="button" disabled={isUploadingImage || menuActions.blocked} onClick={() => void handleCleanupImages()} className="min-h-12 rounded-lg border border-zinc-700 px-3 disabled:opacity-50">Dọn ảnh không dùng</button>
-        <span>Chỉ dọn ảnh không được món nào sử dụng và đã tải lên hơn 24 giờ.</span>
-        {imageNotice && <p role="status">{imageNotice}</p>}
-      </div>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -287,7 +374,6 @@ export function MenuManager({
 
         <button
           type="button"
-          disabled={menuActions.blocked || isUploadingImage}
           onClick={openCreateModal}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
         >
@@ -360,7 +446,7 @@ export function MenuManager({
             Chưa có món ăn nào khớp với bộ lọc.
           </div>
         ) : (
-          listPage.pageItems.map((item) => {
+          filteredItems.map((item) => {
             const catCfg = CATEGORY_LABELS[item.category];
             const stCfg = STATION_LABELS[item.station];
             const linkedIng = item.linked_ingredient_id
@@ -401,18 +487,16 @@ export function MenuManager({
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          disabled={menuActions.blocked || isUploadingImage}
                           onClick={() => openEditModal(item)}
-                          className="min-h-12 min-w-12 p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
                           title="Chỉnh sửa món"
                         >
                           <Edit3 className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
-                          disabled={menuActions.blocked || isUploadingImage}
-                          onClick={() => handleDeleteMenuItem(item)}
-                          className="min-h-12 min-w-12 p-1.5 rounded-md bg-zinc-800 hover:bg-red-950 text-zinc-400 hover:text-red-400"
+                          onClick={() => handleDeleteMenuItem(item.id)}
+                          className="p-1.5 rounded-md bg-zinc-800 hover:bg-red-950 text-zinc-400 hover:text-red-400"
                           title="Xóa món"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -486,10 +570,10 @@ export function MenuManager({
                   {/* Nút gạt Tạm hết hàng (86ing) */}
                   <button
                     type="button"
-                    disabled={menuActions.blocked || isUploadingImage}
+                    disabled={togglingId === item.id}
                     onClick={() => handleToggleAvailability(item)}
                     className={cn(
-                      'min-h-12 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                      'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
                       item.is_available
                         ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
                         : 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/40'
@@ -514,7 +598,6 @@ export function MenuManager({
         )}
       </div>
 
-      <LocalListNavigation {...listPage} label="Menu" />
       {/* Modal Thêm / Chỉnh sửa Món ăn */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto">
@@ -525,7 +608,6 @@ export function MenuManager({
               </h3>
               <button
                 type="button"
-                disabled={isUploadingImage || menuActions.busy}
                 onClick={() => setIsModalOpen(false)}
                 className="text-zinc-400 hover:text-zinc-100"
               >
@@ -534,8 +616,6 @@ export function MenuManager({
             </div>
 
             <form onSubmit={handleSaveMenuItem} className="space-y-4">
-              {errorMessage && <p role="alert" className="text-sm text-red-300">{errorMessage}</p>}
-              {menuActions.error && <p role="alert" className="text-sm text-red-300">{menuActions.error}</p>}
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1">
                   Tên món ăn / Đồ uống *
@@ -565,7 +645,6 @@ export function MenuManager({
                         setPrepTimeMinutes('0');
                       } else if (nextCat === 'FOOD') {
                         setStation('KITCHEN');
-                        setLinkedIngredientId('');
                       }
                     }}
                     className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
@@ -583,11 +662,7 @@ export function MenuManager({
                   </label>
                   <select
                     value={station}
-                    onChange={(e) => {
-                      const next = e.target.value as StationType;
-                      setStation(next);
-                      if (next === 'KITCHEN') setLinkedIngredientId('');
-                    }}
+                    onChange={(e) => setStation(e.target.value as StationType)}
                     className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                   >
                     <option value="KITCHEN">Bếp chế biến (KITCHEN)</option>
@@ -656,7 +731,6 @@ export function MenuManager({
                 </label>
                 <select
                   value={linkedIngredientId}
-                  disabled={category === 'FOOD' || station !== 'BAR_INSTANT'}
                   onChange={(e) => setLinkedIngredientId(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                 >
@@ -684,14 +758,20 @@ export function MenuManager({
                     </span>
                     <input
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/*"
                       onChange={handleImageFileChange}
-                      disabled={isUploadingImage || menuActions.blocked}
+                      disabled={isUploadingImage}
                       className="hidden"
                     />
                   </label>
 
-                  <button type="button" disabled={isUploadingImage || menuActions.blocked || !imageUrl} onClick={() => setImageUrl('')} className="min-h-12 rounded-lg bg-zinc-800 px-3 text-sm text-zinc-200">Bỏ ảnh khỏi món</button>
+                  <input
+                    type="text"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="Hoặc dán trực tiếp URL ảnh WebP..."
+                    className="flex-1 w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200"
+                  />
                 </div>
                 {compressionInfo && (
                   <p className="text-xs text-emerald-400 font-medium">
@@ -714,16 +794,15 @@ export function MenuManager({
               <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
                 <button
                   type="button"
-                  disabled={isUploadingImage || menuActions.busy}
-                onClick={() => setIsModalOpen(false)}
+                  onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  disabled={menuActions.blocked || isUploadingImage}
-                  className="min-h-12 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-sm"
+                  disabled={isSubmitting || isUploadingImage}
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-sm"
                 >
                   {isSubmitting ? 'Đang lưu...' : 'Lưu món ăn'}
                 </button>

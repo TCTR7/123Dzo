@@ -1,6 +1,3 @@
-import { supabaseUrl as normalizeSupabaseUrl, requiredSetting } from '@/lib/config/public';
-import 'server-only';
-
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import {
   createClient as createSupabaseJsClient,
@@ -9,10 +6,18 @@ import {
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/database.types';
 
+function normalizeSupabaseUrl(rawUrl: string | undefined): string {
+  if (!rawUrl) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
+  }
+  return rawUrl.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
+}
 
 /**
  * Khởi tạo Supabase Server Client tích hợp kiểu Database cho Next.js 15 App Router
  * Lưu ý Next.js 15: cookies() trả về Promise nên bắt buộc dùng await cookies().
+ * Ưu tiên SUPABASE_SERVICE_ROLE_KEY ở phía Server để đảm bảo các Server Components
+ * luôn đọc/ghi được dữ liệu bất kể cấu hình GRANT/RLS của anon role trên Supabase.
  */
 export async function createSupabaseServerClient(): Promise<
   SupabaseClient<Database>
@@ -21,15 +26,17 @@ export async function createSupabaseServerClient(): Promise<
   const supabaseUrl = normalizeSupabaseUrl(
     process.env.NEXT_PUBLIC_SUPABASE_URL
   );
-  const supabaseAnonKey = requiredSetting('NEXT_PUBLIC_SUPABASE_ANON_KEY', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!supabaseAnonKey) {
+  if (!supabaseKey) {
     throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
+      'Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
     );
   }
 
-  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+  return createServerClient<Database>(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -62,11 +69,13 @@ export function createSupabaseServiceRoleClient(): SupabaseClient<Database> {
   const supabaseUrl = normalizeSupabaseUrl(
     process.env.NEXT_PUBLIC_SUPABASE_URL
   );
-  const serviceRoleKey = requiredSetting('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!serviceRoleKey) {
     throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY environment variable'
+      'Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable'
     );
   }
 
