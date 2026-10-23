@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import Link from 'next/link';
 import { UserButton } from '@clerk/nextjs';
+import { OnboardingGuideModal } from '@/components/shared/OnboardingGuideModal';
 import {
   BellRing,
   QrCode,
@@ -783,7 +784,7 @@ export function StaffDashboard({
     if (!activeTableSession || isSubmitting) return;
 
     // Theo Mục 7 & Mục 3.2 AGENTS.md: Nhân viên (staff) tuyệt đối không được hủy món COOKING hoặc SERVED
-    if (item.status !== 'QUEUED' && currentStaffRole !== 'admin') {
+    if (item.status !== 'QUEUED' && currentStaffRole !== 'admin' && currentStaffRole !== 'operator') {
       setErrorMessage(
         'Nhân viên phục vụ chỉ được hủy món khi còn đang chờ Bếp (QUEUED). Món đã nấu hoặc đã bưng chỉ Admin mới có quyền hủy.'
       );
@@ -826,7 +827,7 @@ export function StaffDashboard({
 
   const canConfirmActiveTableBill = useMemo(() => {
     if (!activeTableSession) return false;
-    if (currentStaffRole === 'admin') return true;
+    if ((currentStaffRole === 'admin' || currentStaffRole === 'operator')) return true;
     if (!activeTableSession.assigned_staff_id || !validCurrentStaffId) {
       return true;
     }
@@ -946,7 +947,7 @@ export function StaffDashboard({
             Kiểm tra chuông
           </button>
 
-          {currentStaffRole === 'admin' && (
+          {(currentStaffRole === 'admin' || currentStaffRole === 'operator') && (
             <>
               <Link
                 href="/admin"
@@ -966,6 +967,8 @@ export function StaffDashboard({
           )}
 
           <div className="pl-1 flex items-center">
+            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-400">Bàn giao hệ thống</Link>}
+            <OnboardingGuideModal role={currentStaffRole} />
             <UserButton />
           </div>
         </div>
@@ -1357,7 +1360,7 @@ export function StaffDashboard({
                       const menu = menuMap.get(oi.menu_item_id);
                       const canCancel =
                         oi.status === 'QUEUED' ||
-                        (currentStaffRole === 'admin' &&
+                        ((currentStaffRole === 'admin' || currentStaffRole === 'operator') &&
                           oi.status !== 'CANCELLED');
 
                       return (
@@ -1685,7 +1688,7 @@ export function StaffDashboard({
                     .filter(
                       (s) =>
                         s.is_active &&
-                        (s.role === 'staff' || s.role === 'admin')
+                        (s.role === 'staff' || s.role === 'admin' || s.role === 'operator')
                     )
                     .map((s) => (
                       <option key={s.id} value={s.id}>

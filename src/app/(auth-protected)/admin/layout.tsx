@@ -14,6 +14,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
+import { OnboardingGuideModal } from '@/components/shared/OnboardingGuideModal';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -81,7 +82,7 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
                   </h1>
                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     <ShieldCheck className="h-3 w-3" />
-                    ADMIN
+                    {role.toUpperCase()}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 truncate">
@@ -90,9 +91,6 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
               </div>
             </div>
 
-            <div className="shrink-0">
-              <UserButton />
-            </div>
           </div>
 
           <nav className="p-3 grid grid-cols-2 md:grid-cols-1 gap-1.5">
@@ -143,6 +141,11 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
 
       {/* Nội dung trang chính */}
       <main className="flex-1 min-w-0 p-4 md:p-6 lg:p-8 overflow-y-auto">
+        <header className="mb-6 flex flex-wrap items-center justify-end gap-3">
+          {role === 'operator' && <Link href="/operator" className="min-h-12 flex items-center text-sm text-amber-400">Bàn giao hệ thống</Link>}
+          <OnboardingGuideModal role={role} />
+          <UserButton />
+        </header>
         {children}
       </main>
     </div>

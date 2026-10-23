@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import { AccountCredentials, type LoginCredentials } from '@/components/shared/AccountCredentials';
 import type {
   ZoneRow,
   TableRow,
@@ -24,6 +25,7 @@ import type {
 } from '@/types/database.types';
 
 interface StaffAndTableManagerProps {
+  currentStaffRole: StaffRole;
   initialZones: ZoneRow[];
   initialTables: TableRow[];
   initialStaff: StaffProfileRow[];
@@ -31,6 +33,10 @@ interface StaffAndTableManagerProps {
 }
 
 const ROLE_LABELS: Record<StaffRole, { label: string; badgeClass: string }> = {
+  operator: {
+    label: 'Bàn giao hệ thống (operator)',
+    badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  },
   admin: {
     label: 'Quản trị / Thu ngân (admin)',
     badgeClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
@@ -46,6 +52,7 @@ const ROLE_LABELS: Record<StaffRole, { label: string; badgeClass: string }> = {
 };
 
 export function StaffAndTableManager({
+  currentStaffRole,
   initialZones,
   initialTables,
   initialStaff,
@@ -84,6 +91,11 @@ export function StaffAndTableManager({
   const [staffRole, setStaffRole] = useState<StaffRole>('staff');
   const [staffZoneId, setStaffZoneId] = useState<string>('');
   const [staffIsActive, setStaffIsActive] = useState<boolean>(true);
+  const [advancedStaff, setAdvancedStaff] = useState(false);
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [initialPassword, setInitialPassword] = useState('');
+  const [credentials, setCredentials] = useState<LoginCredentials | null>(null);
+  const canEditStaff = (staff: StaffProfileRow) => currentStaffRole === 'operator' || staff.role === 'staff' || staff.role === 'kitchen';
 
   const zoneById = useMemo(() => {
     const map = new Map<string, ZoneRow>();
@@ -104,7 +116,7 @@ export function StaffAndTableManager({
   const activeWaitstaff = useMemo(
     () =>
       staffList.filter(
-        (s) => s.is_active && (s.role === 'staff' || s.role === 'admin')
+        (s) => s.is_active && (s.role === 'staff' || s.role === 'admin' || s.role === 'operator')
       ),
     [staffList]
   );
@@ -357,6 +369,10 @@ export function StaffAndTableManager({
   // XỬ LÝ CRUD NHÂN SỰ (STAFF_PROFILES)
   // ==========================================================================
   function openCreateStaffModal() {
+    setAdvancedStaff(false);
+    setLoginIdentifier('');
+    setInitialPassword('');
+    setCredentials(null);
     setEditingStaff(null);
     setStaffClerkId('');
     setStaffFullName('');
@@ -385,7 +401,7 @@ export function StaffAndTableManager({
     const trimmedId = staffClerkId.trim();
     const trimmedName = staffFullName.trim();
 
-    if (!trimmedId || !trimmedName) {
+    if (((editingStaff || advancedStaff) && !trimmedId) || !trimmedName) {
       setErrorMessage('Clerk User ID và Họ tên nhân viên là bắt buộc.');
       return;
     }
@@ -394,7 +410,19 @@ export function StaffAndTableManager({
     setErrorMessage(null);
 
     try {
-      if (editingStaff) {
+      if (!editingStaff && !advancedStaff) {
+        const identifier = loginIdentifier.trim();
+        const response = await fetch('/api/accounts/provision', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fullName: trimmedName, role: staffRole, password: initialPassword,
+            ...(identifier.includes('@') ? { emailAddress: identifier } : { username: identifier }), assignedZoneId: staffZoneId || null }),
+        });
+        const result = await response.json() as { error?: string; profile: StaffProfileRow; credentials: LoginCredentials };
+        if (!response.ok) throw new Error(result.error || 'Không thể tạo tài khoản.');
+        setStaffList((prev) => [result.profile, ...prev.filter((item) => item.id !== result.profile.id)]);
+        setCredentials(result.credentials);
+        setInitialPassword('');
+      } else if (editingStaff) {
         const { data, error } = await supabase
           .from('staff_profiles')
           .update({
@@ -534,6 +562,8 @@ export function StaffAndTableManager({
           </button>
         </div>
       )}
+
+      {credentials && <AccountCredentials credentials={credentials} />}
 
       {/* PHẦN 1: QUẢN LÝ KHU VỰC (ZONES) */}
       <section className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
@@ -838,6 +868,7 @@ export function StaffAndTableManager({
                       <td className="py-3.5 px-4">
                         <select
                           value={staff.assigned_zone_id ?? ''}
+                          disabled={!canEditStaff(staff)}
                           onChange={(e) =>
                             handleQuickZoneAssignForStaff(
                               staff.id,
@@ -867,6 +898,7 @@ export function StaffAndTableManager({
                         <button
                           type="button"
                           onClick={() => handleToggleStaffActive(staff)}
+                          disabled={!canEditStaff(staff)}
                           className={cn(
                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border',
                             staff.is_active
@@ -891,6 +923,7 @@ export function StaffAndTableManager({
                         <button
                           type="button"
                           onClick={() => openEditStaffModal(staff)}
+                          disabled={!canEditStaff(staff)}
                           className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
                         >
                           <Edit3 className="h-4 w-4" />
@@ -908,7 +941,7 @@ export function StaffAndTableManager({
       {/* Modal Thêm / Sửa Bàn (tables) */}
       {isTableModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <h3 className="text-lg font-bold text-zinc-100">
                 {editingTable ? 'Cập nhật Bàn vật lý' : 'Thêm Bàn vật lý mới'}
@@ -979,7 +1012,7 @@ export function StaffAndTableManager({
       {/* Modal Thêm / Sửa Hồ sơ Nhân viên (staff_profiles) */}
       {isStaffModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <h3 className="text-lg font-bold text-zinc-100">
                 {editingStaff
@@ -996,7 +1029,17 @@ export function StaffAndTableManager({
             </div>
 
             <form onSubmit={handleSaveStaff} className="space-y-4">
-              <div>
+              {errorMessage && <p role="alert" className="text-sm text-red-300">{errorMessage}</p>}
+              {!editingStaff && <>
+                <label className="block text-sm">Email / Tên đăng nhập
+                  <input required={!advancedStaff} disabled={advancedStaff} value={loginIdentifier} onChange={(e) => setLoginIdentifier(e.target.value)} autoComplete="off" className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
+                </label>
+                <label className="block text-sm">Mật khẩu khởi tạo
+                  <input type="password" minLength={8} maxLength={128} required={!advancedStaff} disabled={advancedStaff} value={initialPassword} onChange={(e) => setInitialPassword(e.target.value)} autoComplete="new-password" className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
+                </label>
+                <label className="flex gap-2 text-xs text-zinc-400"><input type="checkbox" checked={advancedStaff} onChange={(e) => setAdvancedStaff(e.target.checked)} />Nâng cao: Nhập clerk_user_id có sẵn</label>
+              </>}
+              {(editingStaff || advancedStaff) && <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1">
                   Clerk User ID (id) *
                 </label>
@@ -1009,7 +1052,7 @@ export function StaffAndTableManager({
                   placeholder="VD: user_2t9x8kLp..."
                   className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 disabled:opacity-60 font-mono"
                 />
-              </div>
+              </div>}
 
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1">
@@ -1036,7 +1079,7 @@ export function StaffAndTableManager({
                 >
                   <option value="staff">Phục vụ chạy bàn (staff)</option>
                   <option value="kitchen">Đầu bếp KDS (kitchen)</option>
-                  <option value="admin">Quản trị viên / Chủ quán (admin)</option>
+                  {currentStaffRole === 'operator' && <><option value="admin">Quản trị viên / Chủ quán (admin)</option><option value="operator">Bàn giao hệ thống (operator)</option></>}
                 </select>
               </div>
 
@@ -1058,7 +1101,7 @@ export function StaffAndTableManager({
                 </select>
               </div>
 
-              <label className="flex items-center gap-2.5 text-sm text-zinc-200 cursor-pointer">
+              {(editingStaff || advancedStaff) && <label className="flex items-center gap-2.5 text-sm text-zinc-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={staffIsActive}
@@ -1066,7 +1109,7 @@ export function StaffAndTableManager({
                   className="rounded border-zinc-700 bg-zinc-950 text-amber-500"
                 />
                 <span>Đang hoạt động (is_active)</span>
-              </label>
+              </label>}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
                 <button

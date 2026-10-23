@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { UserButton } from '@clerk/nextjs';
+import { OnboardingGuideModal } from '@/components/shared/OnboardingGuideModal';
 import {
   ChefHat,
   Flame,
@@ -589,7 +590,7 @@ export function KitchenKdsBoard({
             )}
           </button>
 
-          {currentStaffRole === 'admin' && (
+          {(currentStaffRole === 'admin' || currentStaffRole === 'operator') && (
             <>
               <Link
                 href="/admin"
@@ -609,6 +610,8 @@ export function KitchenKdsBoard({
           )}
 
           <div className="pl-1 flex items-center">
+            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-400">Bàn giao hệ thống</Link>}
+            <OnboardingGuideModal role={currentStaffRole} />
             <UserButton />
           </div>
         </div>

@@ -1,9 +1,11 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { StaffAndTableManager } from '@/components/admin/StaffAndTableManager';
+import { requireStaffRole } from '@/lib/auth/roles';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminStaffPage() {
+  const profile = await requireStaffRole(['operator', 'admin']);
   const supabase = await createSupabaseServerClient();
 
   const [zonesResult, tablesResult, staffResult, sessionsResult] =
@@ -32,6 +34,7 @@ export default async function AdminStaffPage() {
 
   return (
     <StaffAndTableManager
+      currentStaffRole={profile.role}
       initialZones={zonesResult.data ?? []}
       initialTables={tablesResult.data ?? []}
       initialStaff={staffResult.data ?? []}

@@ -1,4 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { clerkClient } from '@clerk/nextjs/server';
+import { canManageRole, getCurrentStaffProfile, isConfiguredOperator, isManager, isStaffRole } from '@/lib/auth/roles';
+import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
 const ALLOWED_PATHS = /^\/(rest\/v1|storage\/v1|auth\/v1)\b/;
 
@@ -7,6 +10,36 @@ async function proxyToSupabase(req: NextRequest, params: Promise<{ path: string[
   const subPath = '/' + (path ?? []).join('/');
   if (!ALLOWED_PATHS.test(subPath)) {
     return NextResponse.json({ message: 'Forbidden Supabase path' }, { status: 403 });
+  }
+
+  // Personnel writes must enforce the same hierarchy as account provisioning.
+  // A hidden UI option alone does not prevent elevating a role via REST.
+  if (path[0] === 'rest' && path[1] === 'v1' && path[2] === 'staff_profiles') {
+    const actor = await getCurrentStaffProfile();
+    const forbidden = () => NextResponse.json({ message: 'Không có quyền thay đổi nhân sự này.' }, { status: 403 });
+    if (!actor) return forbidden();
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      if (!isManager(actor.role) || !['POST', 'PATCH'].includes(req.method)) return forbidden();
+      const body: unknown = await req.clone().json().catch(() => null);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return forbidden();
+      const data = body as Record<string, unknown>;
+      if (Object.keys(data).some((key) => !['id', 'full_name', 'role', 'assigned_zone_id', 'is_active'].includes(key))) return forbidden();
+      if (data.role !== undefined && (!isStaffRole(data.role) || !canManageRole(actor.role, data.role))) return forbidden();
+      const filter = req.nextUrl.searchParams.get('id');
+      const id = req.method === 'POST' ? data.id : filter?.startsWith('eq.') ? filter.slice(3) : null;
+      if (typeof id !== 'string' || !id || (req.method === 'PATCH' && data.id !== undefined)) return forbidden();
+      const existing = await createSupabaseServiceRoleClient().from('staff_profiles').select('role').eq('id', id).maybeSingle();
+      if (existing.error || (existing.data && !canManageRole(actor.role, existing.data.role))) return forbidden();
+      if (id === actor.id && (data.role !== undefined && data.role !== actor.role || data.is_active === false)) return forbidden();
+      if (req.method === 'POST' && !existing.data) {
+        if (!isStaffRole(data.role)) return forbidden();
+        const user = await (await clerkClient()).users.getUser(id).catch(() => null);
+        if (!user || (actor.role !== 'operator' && isConfiguredOperator(user))) return forbidden();
+      }
+    }
+  }
+  if (['accept-profile', 'content-profile'].some((key) => req.headers.has(key) && req.headers.get(key) !== 'public')) {
+    return NextResponse.json({ message: 'Forbidden schema' }, { status: 403 });
   }
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')
