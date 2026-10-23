@@ -1,60 +1,18 @@
 import { test, expect } from '@playwright/test';
 import { CustomerTakeawayPage } from '../page/customer_takeaway.page';
-import { setupSupabaseAndApiMocks } from '../../../common_setup/supabase_mock.fixture';
 
-test.describe('Module: Customer Takeaway & VietQR (/customer/takeaway)', () => {
-  test('1. Hiển thị trang Đặt Món Mang Về công khai (Public Route) không cần đăng nhập', async ({
-    page,
-  }) => {
-    const takeawayPage = new CustomerTakeawayPage(page);
-    await takeawayPage.open();
-
-    await expect(page).toHaveURL(/\/customer\/takeaway/);
-    await expect(page.locator('body')).toContainText(/Mang Về|123Dzô/i);
-  });
-
-  test('2. Lưu và khôi phục lịch sử đơn đặt mang về theo SĐT trong localStorage (Mục 3.1 - Luồng 2)', async ({
-    page,
-  }) => {
-    await setupSupabaseAndApiMocks(page);
-    const takeawayPage = new CustomerTakeawayPage(page);
-    await takeawayPage.open();
-
-    await page.evaluate(() => {
-      const sampleRecords = [
-        {
-          sessionId: 'sess-tw-001',
-          sessionToken: 'tw_abc1234567',
-          paymentCode: 'DZO2026TW01',
-          customerName: 'Anh Hải',
-          customerPhone: '0912345678',
-          totalAmount: 298000,
-          openedAt: new Date().toISOString(),
-        },
-      ];
-      window.localStorage.setItem(
-        '123dzo-takeaway-orders-by-phone',
-        JSON.stringify(sampleRecords)
-      );
-    });
-
-    await page.reload({ waitUntil: 'domcontentloaded' });
-
-    const stored = await page.evaluate(() =>
-      window.localStorage.getItem('123dzo-takeaway-orders-by-phone')
-    );
-    expect(stored).toContain('DZO2026TW01');
-    expect(stored).toContain('0912345678');
-  });
-
-  test('3. Đảm bảo đơn mang về khởi tạo ở trạng thái PENDING_PAYMENT trước khi Webhook xác nhận', async ({
-    page,
-  }) => {
-    const { mutations } = await setupSupabaseAndApiMocks(page);
-    const takeawayPage = new CustomerTakeawayPage(page);
-    await takeawayPage.open();
-
-    // Kiểm tra không có bất kỳ lệnh đẩy món thẳng vào QUEUED khi chưa tạo đơn & thanh toán
-    expect(mutations.filter((m) => m.table === 'order_items')).toHaveLength(0);
-  });
+test.describe('Takeaway remains unavailable until provider rollout', () => {
+ test('public page explains availability and offers no payment action', async ({ page }) => {
+  const takeaway = new CustomerTakeawayPage(page);
+  await takeaway.open();
+  await expect(page).toHaveURL(/\/customer\/takeaway/);
+  await expect(takeaway.getUnavailableNotice()).toBeVisible();
+  await expect(takeaway.getCreateVietQrOrderButton()).toHaveCount(0);
+  await expect(takeaway.getCustomerPhoneInput()).toHaveCount(0);
+ });
+ test('webhook stays closed even when a forged payment is sent', async ({ request }) => {
+  const response = await request.post('/api/webhooks/payment', { data: { amount: 298000, payment_code: 'TEST_ONLY_FORGED' } });
+  expect(response.status()).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: 'PAYMENT_NOT_CONFIGURED' } });
+ });
 });

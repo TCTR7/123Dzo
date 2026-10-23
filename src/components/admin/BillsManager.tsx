@@ -1,6 +1,15 @@
 'use client';
+import { SoundControls } from '@/components/ui/SoundControls';
+import { customerStoreConfig } from '@/lib/customer/customer-config';
+import type { StaffDirectoryEntry as StaffProfileRow } from '@/lib/data/read-contracts';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { pendingSessionAction, submitSessionAction, acknowledgeSessionAction, SessionActionError } from '@/lib/sessions/client';
+import { useSessionBill } from '@/lib/sessions/use-session-bill';
+import { useItemActions } from '@/lib/item-actions/use-item-actions';
+import { ItemActionFeedback } from '@/components/staff/ItemActionFeedback';
+import type { DisplayOrderItem as OrderItemRow } from '@/lib/orders/contracts';
 import {
   Receipt,
   Printer,
@@ -13,13 +22,12 @@ import {
   Banknote,
   X,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import { formatVND, playNotificationSound, cn } from '@/lib/utils';
+import { useServerRefresh } from '@/lib/data/use-server-refresh';
+import { useSnapshotSound } from '@/lib/data/use-snapshot-sound';
+import { formatVND, cn } from '@/lib/utils';
 import type {
   MenuItemRow,
-  OrderItemRow,
   PaymentMethod,
-  StaffProfileRow,
   TableRow,
   TableSessionRow,
 } from '@/types/database.types';
@@ -31,7 +39,13 @@ interface BillsManagerProps {
   menuItems: MenuItemRow[];
   staffProfiles: StaffProfileRow[];
   currentAdminId: string | null;
+  listStatus?: 'OPEN' | 'CLOSED';
+  remoteList?: boolean;
 }
+
+const INCOMPLETE_BILL = 'Chưa tải đủ món để in bill. Cần tải chi tiết đầy đủ trước khi in.';
+const PAYMENT_CONFIRMATION_REQUIRED = 'Hãy xác nhận đã nhận đủ tiền hoặc đối chiếu chuyển khoản thực tế.';
+const UNKNOWN_BILL_RESULT = 'Chưa xác nhận được đóng bill. Hãy kiểm tra thao tác vừa gửi.';
 
 export function BillsManager({
   initialSessions,
@@ -40,14 +54,26 @@ export function BillsManager({
   menuItems,
   staffProfiles,
   currentAdminId,
+  listStatus = 'OPEN',
+  remoteList = false,
 }: BillsManagerProps) {
-  const supabase = createSupabaseBrowserClient();
+  const router = useRouter();
+  const store = customerStoreConfig();
+  const itemActions = useItemActions(currentAdminId);
+  const sessionLock = useRef(false);
+  const [closePending, setClosePending] = useState(false);
+  const [paymentReceived, setPaymentReceived] = useState(false);
 
   const [sessions, setSessions] = useState<TableSessionRow[]>(initialSessions);
   const [orderItems, setOrderItems] =
     useState<OrderItemRow[]>(initialOrderItems);
 
-  const [tabFilter, setTabFilter] = useState<'OPEN' | 'CLOSED'>('OPEN');
+  const [tabFilter, setTabFilter] = useState<'OPEN' | 'CLOSED'>(listStatus);
+  useEffect(() => { setTabFilter(listStatus); }, [listStatus]);
+  function changeTab(status: 'OPEN' | 'CLOSED') {
+    if (remoteList) router.push(`/admin/bills?status=${status}`);
+    else setTabFilter(status);
+  }
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     () => {
@@ -64,9 +90,28 @@ export function BillsManager({
   const [cancellingOrderItem, setCancellingOrderItem] =
     useState<OrderItemRow | null>(null);
   const [cancelReason, setCancelReason] = useState<string>('');
+  useEffect(() => { if (itemActions.pending) setCancellingOrderItem(null); }, [itemActions.pending]);
 
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isSubmittingOther, setIsSubmitting] = useState<boolean>(false);
+  const isSubmitting = isSubmittingOther || itemActions.busy;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const billDetail = useSessionBill(selectedSessionId, initialOrderItems);
+  useEffect(() => {
+    const bill = billDetail.data;
+    if (!bill) return;
+    setOrderItems((previous) => [...previous.filter((row) => row.session_id !== bill.sessionId), ...bill.items]);
+    setSessions((previous) => previous.map((row) => row.id === bill.sessionId ? { ...row, status: bill.status, total_amount: bill.totalAmount, closed_at: bill.closedAt } : row));
+  }, [billDetail.data]);
+  useEffect(() => { setSessions(initialSessions); }, [initialSessions]);
+  useEffect(() => {
+    if (!initialSessions.some(row => row.id === selectedSessionId)) setSelectedSessionId(initialSessions.find(row => row.status === 'REQUEST_BILL')?.id ?? initialSessions[0]?.id ?? null);
+  }, [initialSessions, selectedSessionId]);
+  useEffect(() => { setOrderItems(initialOrderItems); }, [initialOrderItems]);
+  useEffect(() => {
+    if (!currentAdminId) return;
+    try { setClosePending(pendingSessionAction({ mode: 'staff', identity: currentAdminId }) !== null); }
+    catch (error) { setClosePending(true); setErrorMessage(error instanceof Error ? error.message : UNKNOWN_BILL_RESULT); }
+  }, [currentAdminId]);
 
   const tableMap = useMemo(() => {
     const map = new Map<string, TableRow>();
@@ -86,71 +131,8 @@ export function BillsManager({
     return map;
   }, [staffProfiles]);
 
-  // ==========================================================================
-  // LẮNG NGHE REALTIME TABLE_SESSIONS & ORDER_ITEMS (CÓ CLEANUP REMOVECHANNEL)
-  // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('admin-bills-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const created = payload.new as TableSessionRow;
-            setSessions((prev) =>
-              prev.some((s) => s.id === created.id)
-                ? prev
-                : [created, ...prev]
-            );
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as TableSessionRow;
-            const old = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) =>
-              prev.map((s) => (s.id === updated.id ? updated : s))
-            );
-            if (
-              updated.status === 'REQUEST_BILL' &&
-              old.status !== 'REQUEST_BILL'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const created = payload.new as OrderItemRow;
-            setOrderItems((prev) =>
-              prev.some((i) => i.id === created.id)
-                ? prev
-                : [created, ...prev]
-            );
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as OrderItemRow;
-            setOrderItems((prev) =>
-              prev.map((i) => (i.id === updated.id ? updated : i))
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+  useServerRefresh(15000, currentAdminId);
+  useSnapshotSound(initialSessions.filter(session => session.status === 'REQUEST_BILL').map(session => session.id));
 
   const requestBillCount = useMemo(
     () => sessions.filter((s) => s.status === 'REQUEST_BILL').length,
@@ -196,6 +178,7 @@ export function BillsManager({
     () => sessions.find((s) => s.id === selectedSessionId) ?? null,
     [sessions, selectedSessionId]
   );
+  useEffect(() => { setPaymentReceived(false); }, [selectedSessionId, selectedSession?.total_amount, selectedPaymentMethod]);
 
   const selectedSessionOrders = useMemo(() => {
     if (!selectedSession) return [];
@@ -234,7 +217,7 @@ export function BillsManager({
     e: React.FormEvent<HTMLFormElement>
   ) {
     e.preventDefault();
-    if (!cancellingOrderItem || !selectedSession || isSubmitting) return;
+    if (!cancellingOrderItem || !selectedSession || isSubmitting || closePending || sessionLock.current) return;
 
     const trimmedReason = cancelReason.trim();
     if (!trimmedReason) {
@@ -242,62 +225,11 @@ export function BillsManager({
       return;
     }
 
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const nowIso = new Date().toISOString();
-      const validAdminId =
-        currentAdminId && staffMap.has(currentAdminId)
-          ? currentAdminId
-          : null;
-
-      const { data: cancelledItem, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'CANCELLED',
-          cancelled_at: nowIso,
-          cancelled_by: validAdminId,
-          cancel_reason: trimmedReason,
-        })
-        .eq('id', cancellingOrderItem.id)
-        .select('*')
-        .single();
-
-      if (error || !cancelledItem) {
-        throw new Error(error?.message ?? 'Không thể hủy món');
-      }
-
-      const nextOrders = orderItems.map((i) =>
-        i.id === cancelledItem.id ? cancelledItem : i
-      );
-      setOrderItems(nextOrders);
-
-      const newTotal = nextOrders
-        .filter(
-          (i) => i.session_id === selectedSession.id && i.status !== 'CANCELLED'
-        )
-        .reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
-
-      const { data: updatedSession } = await supabase
-        .from('table_sessions')
-        .update({ total_amount: newTotal })
-        .eq('id', selectedSession.id)
-        .select('*')
-        .single();
-
-      if (updatedSession) {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
-        );
-      }
-
-      setCancellingOrderItem(null);
-      setCancelReason('');
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi hủy món');
-    } finally {
-      setIsSubmitting(false);
+    if (cancellingOrderItem.status==='CANCELLED' || itemActions.blocked) return;
+    const item=cancellingOrderItem;
+    if (item.status==='CANCELLED') return;
+    if (await itemActions.run({action:'CANCEL',reason:trimmedReason,items:[{id:item.id,sessionId:item.session_id,expectedStatus:item.status,expectedQuantity:item.quantity}]})) {
+      setCancellingOrderItem(null);setCancelReason('');
     }
   }
 
@@ -307,68 +239,36 @@ export function BillsManager({
    * 2. Giải phóng bàn vật lý (tables.status = 'AVAILABLE', current_session_id = null)
    * 3. Kích hoạt hộp thoại in nhiệt khổ K80 (window.print())
    */
-  async function handlePrintAndCloseBill() {
-    if (!selectedSession || isSubmitting) return;
-
-    // Nếu hóa đơn đã đóng trước đó, chỉ thực hiện in lại bill K80
-    if (selectedSession.status === 'CLOSED') {
-      window.print();
-      return;
+  async function handlePrintAndCloseBill(recovering=false) {
+    if (!currentAdminId || sessionLock.current || isSubmitting || (!recovering && (closePending || itemActions.blocked))) return;
+    if (!recovering && (!billDetail.data || billDetail.loading || billDetail.error)) { setErrorMessage(INCOMPLETE_BILL); return; }
+    if (!recovering && selectedSession?.status==='CLOSED') {
+      if (calculatedBillTotal!==selectedSession.total_amount) {setErrorMessage(INCOMPLETE_BILL);return;}
+      window.print(); return;
     }
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
+    if (!recovering && (!selectedSession || !paymentReceived)) {setErrorMessage(PAYMENT_CONFIRMATION_REQUIRED);return;}
+    sessionLock.current=true;setIsSubmitting(true);setErrorMessage(null);
+    const scope={mode:'staff' as const,identity:currentAdminId};
     try {
-      const nowIso = new Date().toISOString();
-      const finalMethod =
-        selectedSession.payment_method ?? selectedPaymentMethod;
-
-      const { data: closedSession, error: sessionErr } = await supabase
-        .from('table_sessions')
-        .update({
-          status: 'CLOSED',
-          payment_method: finalMethod,
-          total_amount: calculatedBillTotal,
-          closed_at: nowIso,
-        })
-        .eq('id', selectedSession.id)
-        .select('*')
-        .single();
-
-      if (sessionErr || !closedSession) {
-        throw new Error(sessionErr?.message ?? 'Không thể đóng hóa đơn');
-      }
-
-      if (selectedSession.table_id) {
-        await supabase
-          .from('tables')
-          .update({
-            status: 'AVAILABLE',
-            current_session_id: null,
-          })
-          .eq('id', selectedSession.table_id);
-      }
-
-      setSessions((prev) =>
-        prev.map((s) => (s.id === closedSession.id ? closedSession : s))
-      );
-
-      // Đợi DOM cập nhật trạng thái CLOSED rồi gọi lệnh in nhiệt K80
-      setTimeout(() => {
-        window.print();
-      }, 150);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi chốt và in hóa đơn'
-      );
+      const {result}=await submitSessionAction(scope,recovering?undefined:{action:'CLOSE',input:{sessionId:selectedSession!.id,paymentMethod:selectedPaymentMethod,expectedTotal:selectedSession!.total_amount,confirmedReceived:true}});
+      acknowledgeSessionAction(scope,result.operationId);
+      setPaymentReceived(false);router.refresh();
+    } catch(error) {
+      setErrorMessage(error instanceof Error?error.message:UNKNOWN_BILL_RESULT);
+      if (error instanceof SessionActionError && error.totalAmount!==undefined && selectedSession) {
+        const total=error.totalAmount;
+        setSessions((previous)=>previous.map((row)=>row.id===selectedSession.id?{...row,total_amount:total}:row));
+        setPaymentReceived(false);
+      } else router.refresh();
     } finally {
-      setIsSubmitting(false);
+      try {setClosePending(pendingSessionAction(scope)!==null);} catch {setClosePending(true);}
+      sessionLock.current=false;setIsSubmitting(false);
     }
   }
 
   return (
     <div className="space-y-6">
+      <div className="print:hidden"><SoundControls /></div>
       {/* Header không in */}
       <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -388,6 +288,17 @@ export function BillsManager({
         )}
       </div>
 
+      <div className="print:hidden"><ItemActionFeedback pending={itemActions.pending} busy={itemActions.busy} error={itemActions.error} recover={() => itemActions.run()} /></div>
+      {billDetail.loading && <p role="status" className="print:hidden">Đang tải đầy đủ chi tiết bill...</p>}
+      {billDetail.error && <p role="alert" className="print:hidden text-red-300">{billDetail.error}</p>}
+      {closePending && <div role="status" className="print:hidden rounded-xl border border-amber-500 p-4">
+        <p>Có thao tác bàn chưa xác nhận. Kiểm tra trước khi thực hiện tiếp.</p>
+        <button type="button" disabled={isSubmitting} onClick={() => void handlePrintAndCloseBill(true)} className="min-h-12 px-4 text-amber-300">Kiểm tra thao tác bàn vừa gửi</button>
+      </div>}
+      {selectedSession?.status !== 'CLOSED' && <label className="print:hidden min-h-12 flex items-center gap-3 text-sm">
+        <input type="checkbox" checked={paymentReceived} onChange={(event) => setPaymentReceived(event.target.checked)} />
+        Tôi đã nhận đủ tiền hoặc đối chiếu giao dịch chuyển khoản thực tế.
+      </label>}
       {errorMessage && (
         <div className="print:hidden p-3.5 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
@@ -409,7 +320,7 @@ export function BillsManager({
             <div className="flex gap-1.5">
               <button
                 type="button"
-                onClick={() => setTabFilter('OPEN')}
+                onClick={() => changeTab('OPEN')}
                 className={cn(
                   'px-3.5 py-2 rounded-xl text-xs font-bold transition-colors',
                   tabFilter === 'OPEN'
@@ -421,7 +332,7 @@ export function BillsManager({
               </button>
               <button
                 type="button"
-                onClick={() => setTabFilter('CLOSED')}
+                onClick={() => changeTab('CLOSED')}
                 className={cn(
                   'px-3.5 py-2 rounded-xl text-xs font-bold transition-colors',
                   tabFilter === 'CLOSED'
@@ -439,7 +350,7 @@ export function BillsManager({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm số bàn, mã phiên, SĐT..."
+                placeholder="Tìm số bàn, mã phiên, SĐT trên trang này..."
                 className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-100"
               />
             </div>
@@ -632,15 +543,15 @@ export function BillsManager({
 
                 <button
                   type="button"
-                  disabled={isSubmitting}
-                  onClick={handlePrintAndCloseBill}
+                  disabled={isSubmitting || itemActions.blocked || closePending}
+                  onClick={() => void handlePrintAndCloseBill()}
                   className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg"
                 >
                   <Printer className="h-5 w-5" />
                   {selectedSession.status === 'CLOSED'
                     ? 'In lại Hóa đơn Nhiệt K80 (80mm)'
-                    : `In Bill K80 & Đóng bàn (${formatVND(
-                        calculatedBillTotal
+                    : `Xác nhận thu tiền & Đóng bàn (${formatVND(
+                        selectedSession.total_amount
                       )})`}
                 </button>
               </div>
@@ -654,9 +565,9 @@ export function BillsManager({
               >
                 <div className="text-center border-b border-dashed border-black pb-3 space-y-0.5">
                   <div className="font-black text-base tracking-tight">
-                    QUÁN NHẬU 123DZÔ
+                    {store.name}
                   </div>
-                  <div>Đ/C: TP. Hồ Chí Minh • Hotline: 0909.123.456</div>
+                  {store.verified && <div>{store.address} • {store.phone}</div>}
                   <div className="font-bold text-sm pt-1">
                     HÓA ĐƠN THANH TOÁN
                   </div>
@@ -736,7 +647,7 @@ export function BillsManager({
                 <div className="border-t border-dashed border-black pt-2 space-y-1">
                   <div className="flex justify-between text-sm font-black">
                     <span>TỔNG CỘNG:</span>
-                    <span>{formatVND(calculatedBillTotal)}</span>
+                    <span>{formatVND(selectedSession.total_amount)}</span>
                   </div>
                   <div className="flex justify-between text-[11px]">
                     <span>Phương thức TT:</span>
@@ -774,6 +685,7 @@ export function BillsManager({
             </div>
 
             <form onSubmit={handleAdminCancelOrderItem} className="space-y-4">
+              {itemActions.error && <p role="alert" className="text-red-300">{itemActions.error}</p>}
               <p className="text-xs text-zinc-300">
                 Món đang chọn:{' '}
                 <strong>
@@ -792,6 +704,8 @@ export function BillsManager({
                   type="text"
                   required
                   value={cancelReason}
+                  maxLength={500}
+                  disabled={isSubmitting || itemActions.blocked}
                   onChange={(e) => setCancelReason(e.target.value)}
                   placeholder="VD: Bếp làm cháy món / Khách báo đợi quá 15 phút..."
                   className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
@@ -808,8 +722,8 @@ export function BillsManager({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
+                  disabled={isSubmitting || itemActions.blocked || closePending}
+                  className="min-h-12 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
                 >
                   Xác nhận Hủy món
                 </button>

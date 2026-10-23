@@ -1,91 +1,15 @@
 import Link from 'next/link';
-import {
-  Beer,
-  ShoppingBag,
-  LayoutGrid,
-  ChefHat,
-  BarChart3,
-} from 'lucide-react';
-
+import { CustomerShell } from '@/components/customer/CustomerShell';
+import { customerStoreConfig } from '@/lib/customer/customer-config';
+import {takeawaySettings} from '@/lib/takeaway/config';
 export default function HomePage() {
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
-      <div className="max-w-2xl w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 space-y-6 text-center">
-        <div className="h-16 w-16 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400">
-          <Beer className="h-9 w-9" />
-        </div>
-
-        <div className="space-y-2">
-          <h1 className="text-3xl font-black text-amber-400">
-            Quán Nhậu 123Dzô • Smart POS &amp; KDS
-          </h1>
-          <p className="text-sm text-zinc-400">
-            Hệ thống Gọi món QR Động tại bàn, Đặt mang về VietQR &amp; Điều phối Bếp thời gian thực
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-          <Link
-            href="/customer/takeaway"
-            className="p-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800/80 border border-amber-500/40 flex items-center gap-3.5 transition-colors"
-          >
-            <ShoppingBag className="h-6 w-6 text-amber-400 shrink-0" />
-            <div>
-              <div className="font-bold text-sm text-zinc-100">
-                Khách Đặt Mang Về
-              </div>
-              <span className="text-xs text-zinc-400">
-                /customer/takeaway (VietQR)
-              </span>
-            </div>
-          </Link>
-
-          <Link
-            href="/staff"
-            className="p-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800/80 border border-zinc-800 flex items-center gap-3.5 transition-colors"
-          >
-            <LayoutGrid className="h-6 w-6 text-emerald-400 shrink-0" />
-            <div>
-              <div className="font-bold text-sm text-zinc-100">
-                Phân hệ Phục vụ
-              </div>
-              <span className="text-xs text-zinc-400">
-                /staff (Mở bàn &amp; Sinh QR)
-              </span>
-            </div>
-          </Link>
-
-          <Link
-            href="/kitchen"
-            className="p-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800/80 border border-zinc-800 flex items-center gap-3.5 transition-colors"
-          >
-            <ChefHat className="h-6 w-6 text-orange-400 shrink-0" />
-            <div>
-              <div className="font-bold text-sm text-zinc-100">
-                Màn hình Bếp KDS
-              </div>
-              <span className="text-xs text-zinc-400">
-                /kitchen (Gom mẻ &amp; FIFO)
-              </span>
-            </div>
-          </Link>
-
-          <Link
-            href="/admin"
-            className="p-4 rounded-2xl bg-zinc-950 hover:bg-zinc-800/80 border border-zinc-800 flex items-center gap-3.5 transition-colors"
-          >
-            <BarChart3 className="h-6 w-6 text-sky-400 shrink-0" />
-            <div>
-              <div className="font-bold text-sm text-zinc-100">
-                Quản trị &amp; Dashboard KPI
-              </div>
-              <span className="text-xs text-zinc-400">
-                /admin (Doanh thu &amp; KPI)
-              </span>
-            </div>
-          </Link>
-        </div>
-      </div>
-    </main>
-  );
+ const store=customerStoreConfig(),takeaway=takeawaySettings();
+ return <CustomerShell><div className="px-5 py-8 space-y-8">
+  <header className="space-y-3"><p className="text-amber-300 font-bold">123Dzô</p><h1 className="text-3xl font-bold">Hôm nay bạn muốn dùng món gì?</h1><p>Xem thực đơn và chọn món cho bữa ăn của bạn.</p></header>
+  <section className="rounded-2xl border border-amber-400 p-5 space-y-4"><h2 className="text-xl font-bold">Mang về</h2><p>{takeaway.enabled?'Chọn món, chuyển khoản và chờ nhân viên xác nhận tiền trước khi bếp chuẩn bị đơn.':'Bạn có thể xem món và chuẩn bị giỏ. Quán chưa mở nhận đơn và thanh toán trực tuyến.'}</p>
+  <Link href="/customer/takeaway" className="inline-flex items-center justify-center min-h-12 w-full rounded-xl bg-amber-400 text-zinc-950 font-bold p-3">Xem thực đơn mang về</Link></section>
+  <section className="space-y-3"><h2 className="text-xl font-bold">Bạn đang ngồi tại quán?</h2><p>Nhờ nhân viên mở bàn và đưa mã QR. Quét mã để gọi món đúng bàn, không cần đăng nhập.</p></section>
+  {store.verified&&<address className="not-italic border-t border-zinc-700 pt-4 space-y-2"><p>{store.name} · {store.address}</p><p>{store.hours}</p><a href={'tel:'+store.phone.replace(/\s/g,'')} className="inline-flex min-h-12 items-center underline">{store.phone}</a></address>}
+  <footer className="border-t border-zinc-700 pt-4"><Link href="/sign-in" className="inline-flex min-h-12 items-center text-zinc-300 underline">Đăng nhập nhân viên</Link></footer>
+ </div></CustomerShell>;
 }

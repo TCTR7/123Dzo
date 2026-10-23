@@ -1,15 +1,10 @@
+import { supabaseUrl as normalizeSupabaseUrl, requiredSetting } from '@/lib/config/public';
 import { createBrowserClient } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database.types';
 
 let browserClient: SupabaseClient<Database> | undefined;
 
-function normalizeSupabaseUrl(rawUrl: string | undefined): string {
-  if (!rawUrl) {
-    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
-  }
-  return rawUrl.trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
-}
 
 /**
  * Khởi tạo Supabase Browser Client (Singleton trên trình duyệt) tích hợp kiểu Database
@@ -19,7 +14,7 @@ export function createSupabaseBrowserClient(): SupabaseClient<Database> {
   const supabaseUrl = normalizeSupabaseUrl(
     process.env.NEXT_PUBLIC_SUPABASE_URL
   );
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseAnonKey = requiredSetting('NEXT_PUBLIC_SUPABASE_ANON_KEY', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
   if (!supabaseAnonKey) {
     throw new Error(

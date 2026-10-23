@@ -52,11 +52,11 @@ const TAKEAWAY_STORAGE_KEY = '123dzo-takeaway-orders-by-phone';
 const COOLDOWN_SECONDS = 5;
 
 const VIETQR_BANK_ID =
-  process.env.NEXT_PUBLIC_VIETQR_BANK_ID ?? 'MB';
+  process.env.NEXT_PUBLIC_VIETQR_BANK_ID?.trim() ?? '';
 const VIETQR_ACCOUNT_NO =
-  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NO ?? '0987654321';
+  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NO?.trim() ?? '';
 const VIETQR_ACCOUNT_NAME =
-  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NAME ?? 'QUAN NHAU 123DZO';
+  process.env.NEXT_PUBLIC_VIETQR_ACCOUNT_NAME?.trim() ?? '';
 
 function generateTakeawayToken(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';

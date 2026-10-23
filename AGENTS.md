@@ -6,10 +6,11 @@ Tài liệu này định nghĩa quy tắc làm việc, tiêu chuẩn kỹ thuậ
 
 ## 📌 1. NGUỒN CHÂN LÝ DUY NHẤT (SINGLE SOURCE OF TRUTH)
 Trước khi thực hiện bất kỳ việc tạo file, viết code hay review nào, **BẮT BUỘC** phải đọc kỹ file:
-👉 **`docs/PRO_SPEC.md`**
+👉 **`docs/PRD_SPEC.md`**
 
-* **Tuyệt đối không tự ý bịa thêm bảng (tables), đổi tên cột (columns), hoặc thay đổi trạng thái (enums)** đã được quy định tại **Mục 5, Mục 11 và Mục 12** trong `docs/PRO_SPEC.md`.
-* Mọi cấu trúc thư mục phải tuân thủ tuyệt đối **Mục 13** trong `docs/PRO_SPEC.md`.
+* **Tuyệt đối không tự ý bịa thêm bảng (tables), đổi tên cột (columns), hoặc thay đổi trạng thái (enums)** đã được quy định tại **Mục 5, Mục 11 và Mục 12** trong `docs/PRD_SPEC.md`.
+* Mọi cấu trúc thư mục phải tuân thủ tuyệt đối **Mục 13** trong `docs/PRD_SPEC.md`.
+* Mọi task khi thực hiện phải qua bước Kiểm soát overthinking và công việc không thiết yếu: tuân thủ tuyệ đối trong `docs/FOCUSED_EXECUTION_GUIDE_EN.md`
 
 ---
 
@@ -21,9 +22,9 @@ Khi triển khai tính năng cho dự án **123Dzô**, Antigravity phải tuân 
 Không viết tràn lan toàn bộ ứng dụng cùng lúc. Hãy thực hiện và kiểm tra theo từng Phase:
 1. **Phase 1 (Foundation & Database):** Khởi tạo `supabase/schema.sql`, `src/types/database.types.ts`, cấu hình Supabase Client/Server (`src/lib/supabase/`) và Clerk Middleware (`src/middleware.ts`).
 2. **Phase 2 (Admin Core):** Xây dựng `/admin/menu`, `/admin/inventory` (có nén ảnh WebP `< 80KB`), và quản lý bàn/khu vực.
-3. **Phase 3 (Staff & Dine-in QR Flow):** Xây dựng `/staff` (Sơ đồ bàn, Mở bàn sinh `session_token` QR động, Trả bia thừa, Chuyển bàn) và `/t/[token]` (Khách gọi món tại bàn, Chia bill Campuchia, Xem vị trí hàng đợi Realtime).
+3. **Phase 3 (Staff & Dine-in QR Flow):** Xây dựng `/staff` (Sơ đồ bàn, Mở bàn sinh `session_token` QR động, Trả bia thừa, Chuyển bàn) và `/customer/order/[token]` (Khách gọi món tại bàn, Chia bill Campuchia, Xem vị trí hàng đợi Realtime).
 4. **Phase 4 (Kitchen KDS & Web Push):** Xây dựng `/kitchen` (Chế độ Gom món trùng `Batch Cooking` & Hàng đợi `FIFO`, giữ sáng màn hình `Wake Lock API`) và API bắn thông báo đẩy (`/api/push/notify`) kèm âm thanh cho đúng nhân viên phụ trách bàn.
-5. **Phase 5 (Takeaway VietQR & Analytics Dashboard):** Xây dựng `/mang-ve` kết hợp Webhook thanh toán (`/api/webhooks/payment`) và Dashboard đánh giá KPI cuối tháng tại `/admin` bằng `Recharts` + PostgreSQL Views.
+5. **Phase 5 (Takeaway VietQR & Analytics Dashboard):** Xây dựng `/customer/takeaway` kết hợp Webhook thanh toán (`/api/webhooks/payment`) và Dashboard đánh giá KPI cuối tháng tại `/admin` bằng `Recharts` + PostgreSQL Views.
 
 ### 2.2. Quy tắc Code bắt buộc (Strict Coding Standards)
 * **Next.js 15 App Router:**
@@ -40,15 +41,15 @@ Không viết tràn lan toàn bộ ứng dụng cùng lúc. Hãy thực hiện v
 
 ## 🔍 3. HƯỚNG DẪN DÀNH CHO CODEX (REVIEWER & QA AGENT)
 
-Khi được yêu cầu Review code do Antigravity viết, **Codex** không sửa code theo cảm tính mà phải đối chiếu từng dòng code với `docs/PRO_SPEC.md` theo **6 tiêu chí kiểm tra (Audit Checklist)** dưới đây:
+Khi được yêu cầu Review code do Antigravity viết, **Codex** không sửa code theo cảm tính mà phải đối chiếu từng dòng code với `docs/PRD_SPEC.md` theo **6 tiêu chí kiểm tra (Audit Checklist)** dưới đây:
 
 ### 3.1. Kiểm tra tính toàn vẹn Schema & TypeScript (Schema Alignment)
-* [ ] Tên bảng và tên cột trong các câu lệnh `.from('...').select('...')` có khớp 100% với **Mục 12** của `docs/PRO_SPEC.md` và `database.types.ts` không?
+* [ ] Tên bảng và tên cột trong các câu lệnh `.from('...').select('...')` có khớp 100% với **Mục 12** của `docs/PRD_SPEC.md` và `database.types.ts` không?
 * [ ] Có bất kỳ kiểu `any` nào bị lọt vào code TypeScript không?
 
 ### 3.2. Kiểm tra Lỗ hổng Nghiệp vụ & Chống phá hoại (Security & Anti-Fraud)
-* [ ] **Tại `/t/[token]`:** Đã kiểm tra trạng thái `table_sessions.status === 'ACTIVE'` trước khi cho phép khách thêm món vào `order_items` chưa? (Nếu bàn đã `CLOSED` hoặc `PENDING_PAYMENT` thì phải chặn hoàn toàn).
-* [ ] **Tại `/mang-ve`:** Đơn mang về có bị lọt vào màn hình Bếp trước khi Webhook `/api/webhooks/payment` xác nhận thành công không?
+* [ ] **Tại `/customer/order/[token]`:** Đã kiểm tra trạng thái `table_sessions.status === 'ACTIVE'` trước khi cho phép khách thêm món vào `order_items` chưa? (Nếu bàn đã `CLOSED` hoặc `PENDING_PAYMENT` thì phải chặn hoàn toàn).
+* [ ] **Tại `/customer/takeaway`:** Đơn mang về có bị lọt vào màn hình Bếp trước khi Webhook `/api/webhooks/payment` xác nhận thành công không?
 * [ ] **Phân quyền (RBAC):** Nhân viên (`staff`) có bị cấp nhầm quyền xóa món đang nấu (`COOKING`) hoặc đã bưng (`SERVED`) không? (Theo Mục 7: chỉ `admin` mới được hủy món đã nấu và phải có `cancel_reason`).
 
 ### 3.3. Kiểm tra Độ chính xác của Dữ liệu KPI & Timestamps
@@ -65,6 +66,6 @@ Khi được yêu cầu Review code do Antigravity viết, **Codex** không sử
 
 ### 3.5. Định dạng Báo cáo Review của Codex
 Khi trả kết quả review, Codex phải xuất ra theo cấu trúc:
-1. **🚨 Lỗi Nghiêm trọng (Critical Bugs / Lệch Spec):** Chỉ rõ tên file, số dòng, nguyên nhân lệch với `docs/PRO_SPEC.md` và đoạn code sửa lại.
+1. **🚨 Lỗi Nghiêm trọng (Critical Bugs / Lệch Spec):** Chỉ rõ tên file, số dòng, nguyên nhân lệch với `docs/PRD_SPEC.md` và đoạn code sửa lại.
 2. **⚠️ Cảnh báo Hiệu năng / Realtime (Warnings):** Các vấn đề về rò rỉ kết nối, thiếu index SQL hoặc trải nghiệm UX trên điện thoại.
 3. **✅ Đánh giá Mức độ hoàn thành Phase:** Xác nhận Phase hiện tại đã đạt chuẩn để chuyển sang Phase tiếp theo hay chưa.

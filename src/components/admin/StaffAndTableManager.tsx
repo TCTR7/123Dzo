@@ -1,6 +1,11 @@
 'use client';
+import type { AdminStaffDirectoryEntry as StaffProfileRow } from '@/lib/data/read-contracts';
+import { useListPage, LocalListNavigation } from '@/components/ui/LocalListNavigation';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { pendingSessionAction, submitSessionAction, acknowledgeSessionAction } from '@/lib/sessions/client';
+import type { SessionCommand } from '@/lib/sessions/contracts';
 import {
   MapPin,
   Plus,
@@ -13,12 +18,15 @@ import {
   XCircle,
   X,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useMetadata } from '@/lib/metadata/use-metadata';
+import { pendingMetadata } from '@/lib/metadata/client';
+import { tableSnapshot } from '@/lib/metadata/contracts';
+import { MetadataFeedback } from './MetadataFeedback';
 import { cn } from '@/lib/utils';
+import { editableStaffProfile, isStaffRole, saveStaffProfile, type StaffProfileEditable } from '@/lib/auth/staff-profile';
 import type {
   ZoneRow,
   TableRow,
-  StaffProfileRow,
   StaffRole,
   TableSessionRow,
 } from '@/types/database.types';
@@ -28,8 +36,10 @@ interface StaffAndTableManagerProps {
   initialTables: TableRow[];
   initialStaff: StaffProfileRow[];
   initialActiveSessions: TableSessionRow[];
+  currentAdminId?: string;
 }
 
+const ASSIGNMENT_REQUIRED = 'Chọn phiên bàn đang mở và nhân viên nhận bàn đang làm việc.';
 const ROLE_LABELS: Record<StaffRole, { label: string; badgeClass: string }> = {
   admin: {
     label: 'Quản trị / Thu ngân (admin)',
@@ -50,8 +60,11 @@ export function StaffAndTableManager({
   initialTables,
   initialStaff,
   initialActiveSessions,
+  currentAdminId,
 }: StaffAndTableManagerProps) {
-  const supabase = createSupabaseBrowserClient();
+  const metadata = useMetadata(currentAdminId);
+  const router = useRouter();
+  const [assignmentPending, setAssignmentPending] = useState(false);
 
   const [zones, setZones] = useState<ZoneRow[]>(initialZones);
   const [tables, setTables] = useState<TableRow[]>(initialTables);
@@ -62,7 +75,58 @@ export function StaffAndTableManager({
 
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>('ALL');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [localBusy, setIsSubmitting] = useState<boolean>(false);
+  const isSubmitting = localBusy || metadata.busy;
+  const staffMutationPending = useRef(false);
+  useEffect(() => { setActiveSessions(initialActiveSessions); }, [initialActiveSessions]);
+  useEffect(() => { setTables(initialTables); }, [initialTables]);
+  useEffect(() => { setZones(initialZones); }, [initialZones]);
+  useEffect(() => { setStaffList(initialStaff); }, [initialStaff]);
+  useEffect(() => {
+    if (!currentAdminId) return;
+    try { setAssignmentPending(pendingSessionAction({ mode: 'staff', identity: currentAdminId }) !== null); }
+    catch (error) { setAssignmentPending(true); setErrorMessage(error instanceof Error ? error.message : ASSIGNMENT_REQUIRED); }
+  }, [currentAdminId]);
+
+  async function runAssignment(command?: SessionCommand, alreadyLocked = false) {
+    if (!currentAdminId || (!alreadyLocked && !beginStaffMutationForRecovery())) return;
+    const scope = { mode: 'staff' as const, identity: currentAdminId };
+    try {
+      const { result } = await submitSessionAction(scope, command);
+      acknowledgeSessionAction(scope, result.operationId); router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : ASSIGNMENT_REQUIRED); router.refresh();
+    } finally {
+      try { setAssignmentPending(pendingSessionAction(scope) !== null); } catch { setAssignmentPending(true); }
+      endStaffMutation();
+    }
+  }
+  function beginStaffMutationForRecovery() {
+    if (staffMutationPending.current || isSubmitting || metadata.pending) return false;
+    staffMutationPending.current = true; setIsSubmitting(true); setErrorMessage(null); return true;
+  }
+
+  function beginStaffMutation(): boolean {
+    if (staffMutationPending.current || isSubmitting || metadata.pending || assignmentPending) return false;
+    staffMutationPending.current = true;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    return true;
+  }
+
+  function endStaffMutation() {
+    staffMutationPending.current = false;
+    setIsSubmitting(false);
+  }
+
+  function mergeSavedStaff(saved: StaffProfileEditable) {
+    setStaffList((previous) => {
+      const exists = previous.some((staff) => staff.id === saved.id);
+      return exists
+        ? previous.map((staff) => staff.id === saved.id ? { ...staff, ...saved } : staff)
+        : [{ ...saved, has_push_subscription: false }, ...previous];
+    });
+  }
 
   // State tạo nhanh Khu vực (zones)
   const [newZoneName, setNewZoneName] = useState<string>('');
@@ -114,85 +178,26 @@ export function StaffAndTableManager({
     return tables.filter((t) => t.zone_id === selectedZoneFilter);
   }, [tables, selectedZoneFilter]);
 
+  const tablePage = useListPage(filteredTables, selectedZoneFilter);
+  const staffPage = useListPage(staffList, 'staff');
+
   // ==========================================================================
   // XỬ LÝ CRUD KHU VỰC (ZONES)
   // ==========================================================================
   async function handleSaveZone(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isSubmitting) return;
-
-    const trimmed = newZoneName.trim();
-    if (!trimmed) {
-      setErrorMessage('Tên khu vực không được để trống.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      if (editingZone) {
-        const { data, error } = await supabase
-          .from('zones')
-          .update({ name: trimmed })
-          .eq('id', editingZone.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật khu vực');
-        }
-
-        setZones((prev) => prev.map((z) => (z.id === data.id ? data : z)));
-        setEditingZone(null);
-      } else {
-        const { data, error } = await supabase
-          .from('zones')
-          .insert({ name: trimmed })
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể thêm khu vực mới');
-        }
-
-        setZones((prev) => [...prev, data]);
-      }
-
-      setNewZoneName('');
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi lưu khu vực'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (isSubmitting || assignmentPending || metadata.blocked) return;
+    const name = newZoneName.trim();
+    if (!name) return;
+    const confirmed = await metadata.run(editingZone
+      ? { resource: 'ZONE', action: 'UPDATE', id: editingZone.id, item: { name }, expected: { name: editingZone.name } }
+      : { resource: 'ZONE', action: 'CREATE', id: crypto.randomUUID(), item: { name }, expected: null });
+    if (confirmed) { setEditingZone(null); setNewZoneName(''); }
   }
 
-  async function handleDeleteZone(zoneId: string) {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const { error } = await supabase.from('zones').delete().eq('id', zoneId);
-      if (error) {
-        throw new Error(error.message);
-      }
-      setZones((prev) => prev.filter((z) => z.id !== zoneId));
-      setTables((prev) => prev.filter((t) => t.zone_id !== zoneId));
-      setStaffList((prev) =>
-        prev.map((s) =>
-          s.assigned_zone_id === zoneId ? { ...s, assigned_zone_id: null } : s
-        )
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Không thể xóa khu vực'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+  async function handleDeleteZone(zone: ZoneRow) {
+    if (isSubmitting || assignmentPending || metadata.blocked) return;
+    await metadata.run({ resource: 'ZONE', action: 'DELETE', id: zone.id, item: null, expected: { name: zone.name } });
   }
 
   // ==========================================================================
@@ -220,137 +225,28 @@ export function StaffAndTableManager({
 
   async function handleSaveTable(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isSubmitting) return;
-
-    const trimmedNumber = tableNumber.trim();
-    if (!trimmedNumber || !tableZoneId) {
-      setErrorMessage('Vui lòng nhập tên bàn và chọn khu vực.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      if (editingTable) {
-        const { data, error } = await supabase
-          .from('tables')
-          .update({
-            table_number: trimmedNumber,
-            zone_id: tableZoneId,
-          })
-          .eq('id', editingTable.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật bàn');
-        }
-
-        setTables((prev) => prev.map((t) => (t.id === data.id ? data : t)));
-      } else {
-        const { data, error } = await supabase
-          .from('tables')
-          .insert({
-            table_number: trimmedNumber,
-            zone_id: tableZoneId,
-            status: 'AVAILABLE',
-          })
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể tạo bàn mới');
-        }
-
-        setTables((prev) => [...prev, data]);
-      }
-
-      setIsTableModalOpen(false);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi lưu bàn');
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (isSubmitting || assignmentPending || metadata.blocked) return;
+    const item = { table_number: tableNumber.trim(), zone_id: tableZoneId };
+    const confirmed = await metadata.run(editingTable
+      ? { resource: 'TABLE', action: 'UPDATE', id: editingTable.id, item, expected: tableSnapshot(editingTable) }
+      : { resource: 'TABLE', action: 'CREATE', id: crypto.randomUUID(), item, expected: null });
+    if (confirmed || (currentAdminId && pendingMetadata(currentAdminId))) setIsTableModalOpen(false);
   }
 
-  async function handleDeleteTable(tableId: string) {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const { error } = await supabase
-        .from('tables')
-        .delete()
-        .eq('id', tableId);
-      if (error) {
-        throw new Error(error.message);
-      }
-      setTables((prev) => prev.filter((t) => t.id !== tableId));
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi xóa bàn');
-    } finally {
-      setIsSubmitting(false);
-    }
+  async function handleDeleteTable(table: TableRow) {
+    if (isSubmitting || assignmentPending || metadata.blocked) return;
+    await metadata.run({ resource: 'TABLE', action: 'DELETE', id: table.id, item: null, expected: tableSnapshot(table) });
   }
 
   /**
    * Gán nhân viên phụ trách trực tiếp cho phiên bàn đang mở (table_sessions.assigned_staff_id)
-   * hoặc gán nhân viên phụ trách Khu vực của bàn đó (staff_profiles.assigned_zone_id)
+   * Không tự đổi khu vực mặc định của nhân viên khi phân công một bàn.
    */
-  async function handleAssignStaffToTable(
-    table: TableRow,
-    staffId: string | null
-  ) {
-    setErrorMessage(null);
-    const activeSession = sessionByTableId.get(table.id);
-
-    try {
-      // Nếu bàn đang có phiên mở (ACTIVE / REQUEST_BILL), cập nhật trực tiếp table_sessions.assigned_staff_id
-      if (activeSession) {
-        const { data, error } = await supabase
-          .from('table_sessions')
-          .update({ assigned_staff_id: staffId })
-          .eq('id', activeSession.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(
-            error?.message ?? 'Không thể cập nhật nhân viên phụ trách phiên bàn'
-          );
-        }
-
-        setActiveSessions((prev) =>
-          prev.map((s) => (s.id === data.id ? data : s))
-        );
-      }
-
-      // Đồng thời nếu chọn một nhân viên cụ thể, gán nhân viên đó phụ trách khu vực của bàn (assigned_zone_id)
-      if (staffId) {
-        const { data: updatedStaff, error: staffError } = await supabase
-          .from('staff_profiles')
-          .update({ assigned_zone_id: table.zone_id })
-          .eq('id', staffId)
-          .select('*')
-          .single();
-
-        if (staffError || !updatedStaff) {
-          throw new Error(
-            staffError?.message ?? 'Không thể gán khu vực cho nhân viên'
-          );
-        }
-
-        setStaffList((prev) =>
-          prev.map((s) => (s.id === updatedStaff.id ? updatedStaff : s))
-        );
-      }
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi gán nhân viên phụ trách'
-      );
-    }
+  async function handleAssignStaffToTable(table: TableRow, staffId: string | null) {
+    const session=sessionByTableId.get(table.id);
+    if (!currentAdminId || !session || !staffId) {setErrorMessage(ASSIGNMENT_REQUIRED);return;}
+    if (assignmentPending || !beginStaffMutation()) return;
+    await runAssignment({action:'HANDOVER',input:{sessionId:session.id,expectedAssignedStaffId:session.assigned_staff_id,assignedStaffId:staffId}},true);
   }
 
   // ==========================================================================
@@ -380,7 +276,7 @@ export function StaffAndTableManager({
 
   async function handleSaveStaff(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || staffMutationPending.current) return;
 
     const trimmedId = staffClerkId.trim();
     const trimmedName = staffFullName.trim();
@@ -390,47 +286,13 @@ export function StaffAndTableManager({
       return;
     }
 
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
+    if (!beginStaffMutation()) return;
     try {
-      if (editingStaff) {
-        const { data, error } = await supabase
-          .from('staff_profiles')
-          .update({
-            full_name: trimmedName,
-            role: staffRole,
-            assigned_zone_id: staffZoneId || null,
-            is_active: staffIsActive,
-          })
-          .eq('id', editingStaff.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật nhân viên');
-        }
-
-        setStaffList((prev) => prev.map((s) => (s.id === data.id ? data : s)));
-      } else {
-        const { data, error } = await supabase
-          .from('staff_profiles')
-          .insert({
-            id: trimmedId,
-            full_name: trimmedName,
-            role: staffRole,
-            assigned_zone_id: staffZoneId || null,
-            is_active: staffIsActive,
-          })
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể thêm hồ sơ nhân viên');
-        }
-
-        setStaffList((prev) => [data, ...prev]);
-      }
+      const saved = await saveStaffProfile({
+        id: editingStaff?.id ?? trimmedId, full_name: trimmedName, role: staffRole,
+        assigned_zone_id: staffZoneId || null, is_active: staffIsActive,
+      }, editingStaff ? editableStaffProfile(editingStaff) : null);
+      mergeSavedStaff(saved);
 
       setIsStaffModalOpen(false);
     } catch (err) {
@@ -438,7 +300,7 @@ export function StaffAndTableManager({
         err instanceof Error ? err.message : 'Lỗi khi lưu hồ sơ nhân viên'
       );
     } finally {
-      setIsSubmitting(false);
+      endStaffMutation();
     }
   }
 
@@ -446,46 +308,31 @@ export function StaffAndTableManager({
     staffId: string,
     zoneId: string | null
   ) {
-    setErrorMessage(null);
+    const staff = staffList.find((candidate) => candidate.id === staffId);
+    if (!staff || !beginStaffMutation()) return;
     try {
-      const { data, error } = await supabase
-        .from('staff_profiles')
-        .update({ assigned_zone_id: zoneId })
-        .eq('id', staffId)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(error?.message ?? 'Không thể đổi khu vực phụ trách');
-      }
-
-      setStaffList((prev) => prev.map((s) => (s.id === data.id ? data : s)));
+      const expected = editableStaffProfile(staff);
+      mergeSavedStaff(await saveStaffProfile({ ...expected, assigned_zone_id: zoneId }, expected));
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Lỗi khi cập nhật khu vực nhân viên'
       );
+    } finally {
+      endStaffMutation();
     }
   }
 
   async function handleToggleStaffActive(staff: StaffProfileRow) {
-    setErrorMessage(null);
+    if (!beginStaffMutation()) return;
     try {
-      const { data, error } = await supabase
-        .from('staff_profiles')
-        .update({ is_active: !staff.is_active })
-        .eq('id', staff.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(error?.message ?? 'Không thể đổi trạng thái nhân sự');
-      }
-
-      setStaffList((prev) => prev.map((s) => (s.id === data.id ? data : s)));
+      const expected = editableStaffProfile(staff);
+      mergeSavedStaff(await saveStaffProfile({ ...expected, is_active: !staff.is_active }, expected));
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Lỗi khi đổi trạng thái nhân sự'
       );
+    } finally {
+      endStaffMutation();
     }
   }
 
@@ -514,6 +361,7 @@ export function StaffAndTableManager({
           <button
             type="button"
             onClick={openCreateStaffModal}
+            disabled={isSubmitting || assignmentPending || metadata.pending}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -522,8 +370,13 @@ export function StaffAndTableManager({
         </div>
       </div>
 
+      <MetadataFeedback {...metadata} recover={() => metadata.run()} />
+      {assignmentPending && <div role="status" className="rounded-xl border border-amber-500 p-4">
+        <p>Có thao tác bàn chưa xác nhận.</p>
+        <button type="button" disabled={isSubmitting} onClick={() => void runAssignment()} className="min-h-12 px-4 text-amber-300">Kiểm tra thao tác bàn vừa gửi</button>
+      </div>}
       {errorMessage && (
-        <div className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div role="alert" className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
@@ -559,8 +412,8 @@ export function StaffAndTableManager({
             />
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm whitespace-nowrap"
+              disabled={isSubmitting || assignmentPending || metadata.pending}
+              className="min-h-12 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm whitespace-nowrap"
             >
               {editingZone ? 'Lưu tên' : '+ Thêm khu vực'}
             </button>
@@ -610,15 +463,16 @@ export function StaffAndTableManager({
                           setEditingZone(zone);
                           setNewZoneName(zone.name);
                         }}
-                        className="p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                        className="min-h-12 min-w-12 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
                         title="Đổi tên khu vực"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDeleteZone(zone.id)}
-                        className="p-1.5 rounded-md bg-zinc-900 hover:bg-red-950 text-zinc-400 hover:text-red-400"
+                        disabled={isSubmitting || assignmentPending || metadata.blocked}
+                        onClick={() => handleDeleteZone(zone)}
+                        className="min-h-12 min-w-12 p-1.5 rounded-md bg-zinc-900 hover:bg-red-950 text-zinc-400 hover:text-red-400"
                         title="Xóa khu vực"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -696,7 +550,7 @@ export function StaffAndTableManager({
               Chưa có bàn vật lý nào trong khu vực này.
             </div>
           ) : (
-            filteredTables.map((table) => {
+            tablePage.pageItems.map((table) => {
               const zone = zoneById.get(table.zone_id);
               const activeSession = sessionByTableId.get(table.id);
               const zoneStaff = activeWaitstaff.find(
@@ -738,16 +592,18 @@ export function StaffAndTableManager({
                       </span>
                       <button
                         type="button"
+                        disabled={isSubmitting || assignmentPending || metadata.blocked}
                         onClick={() => openEditTableModal(table)}
-                        className="p-1 text-zinc-400 hover:text-zinc-200"
+                        className="min-h-12 min-w-12 p-1 text-zinc-400 hover:text-zinc-200"
                         title="Sửa bàn"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDeleteTable(table.id)}
-                        className="p-1 text-zinc-400 hover:text-red-400"
+                        disabled={isSubmitting || assignmentPending || metadata.blocked}
+                        onClick={() => handleDeleteTable(table)}
+                        className="min-h-12 min-w-12 p-1 text-zinc-400 hover:text-red-400"
                         title="Xóa bàn"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -762,6 +618,8 @@ export function StaffAndTableManager({
                     </label>
                     <select
                       value={currentAssignedStaffId}
+                      disabled={!activeSession || !currentAdminId || isSubmitting || assignmentPending || metadata.pending}
+                      aria-label={`Nhân viên phụ trách ${table.table_number}`}
                       onChange={(e) =>
                         handleAssignStaffToTable(
                           table,
@@ -777,6 +635,11 @@ export function StaffAndTableManager({
                         </option>
                       ))}
                     </select>
+                    {!activeSession && (
+                      <p className="mt-1.5 text-xs text-zinc-400">
+                        Mở bàn để phân công. Khu vực mặc định sửa tại mục Nhân sự.
+                      </p>
+                    )}
                   </div>
                 </div>
               );
@@ -785,6 +648,7 @@ export function StaffAndTableManager({
         </div>
       </section>
 
+      <LocalListNavigation {...tablePage} label="Bàn" />
       {/* PHẦN 3: DANH SÁCH HỒ SƠ NHÂN SỰ (STAFF_PROFILES) */}
       <section className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
         <div className="flex items-center gap-2">
@@ -815,7 +679,7 @@ export function StaffAndTableManager({
                   </td>
                 </tr>
               ) : (
-                staffList.map((staff) => {
+                staffPage.pageItems.map((staff) => {
                   const roleCfg = ROLE_LABELS[staff.role];
                   return (
                     <tr key={staff.id} className="hover:bg-zinc-800/30">
@@ -838,6 +702,7 @@ export function StaffAndTableManager({
                       <td className="py-3.5 px-4">
                         <select
                           value={staff.assigned_zone_id ?? ''}
+                          disabled={isSubmitting || assignmentPending || metadata.pending}
                           onChange={(e) =>
                             handleQuickZoneAssignForStaff(
                               staff.id,
@@ -855,7 +720,7 @@ export function StaffAndTableManager({
                         </select>
                       </td>
                       <td className="py-3.5 px-4 text-xs">
-                        {staff.push_subscription ? (
+                        {staff.has_push_subscription ? (
                           <span className="text-emerald-400 font-medium">
                             Đã bật thông báo
                           </span>
@@ -867,6 +732,7 @@ export function StaffAndTableManager({
                         <button
                           type="button"
                           onClick={() => handleToggleStaffActive(staff)}
+                          disabled={isSubmitting || assignmentPending || metadata.pending}
                           className={cn(
                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border',
                             staff.is_active
@@ -891,7 +757,9 @@ export function StaffAndTableManager({
                         <button
                           type="button"
                           onClick={() => openEditStaffModal(staff)}
-                          className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          disabled={isSubmitting || assignmentPending || metadata.pending}
+                          aria-label={`Sửa hồ sơ ${staff.full_name}`}
+                          className="min-h-12 min-w-12 p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
                         >
                           <Edit3 className="h-4 w-4" />
                         </button>
@@ -905,6 +773,7 @@ export function StaffAndTableManager({
         </div>
       </section>
 
+      <LocalListNavigation {...staffPage} label="Nhân sự" />
       {/* Modal Thêm / Sửa Bàn (tables) */}
       {isTableModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
@@ -923,6 +792,7 @@ export function StaffAndTableManager({
             </div>
 
             <form onSubmit={handleSaveTable} className="space-y-4">
+              {metadata.error && <p role="alert" className="text-red-300">{metadata.error}</p>}
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1">
                   Tên / Số bàn *
@@ -965,8 +835,8 @@ export function StaffAndTableManager({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm"
+                  disabled={isSubmitting || assignmentPending || metadata.pending}
+                  className="min-h-12 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm"
                 >
                   {isSubmitting ? 'Đang lưu...' : 'Lưu thông tin bàn'}
                 </button>
@@ -1031,7 +901,7 @@ export function StaffAndTableManager({
                 </label>
                 <select
                   value={staffRole}
-                  onChange={(e) => setStaffRole(e.target.value as StaffRole)}
+                  onChange={(e) => { if (isStaffRole(e.target.value)) setStaffRole(e.target.value); }}
                   className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                 >
                   <option value="staff">Phục vụ chạy bàn (staff)</option>
@@ -1078,8 +948,8 @@ export function StaffAndTableManager({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm"
+                  disabled={isSubmitting || assignmentPending || metadata.pending}
+                  className="min-h-12 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm"
                 >
                   {isSubmitting ? 'Đang lưu...' : 'Lưu nhân sự'}
                 </button>

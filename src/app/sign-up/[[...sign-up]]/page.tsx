@@ -14,7 +14,7 @@ export default function SignUpPage() {
             123Dzô • Tạo Tài Khoản Nhân Sự
           </h1>
           <p className="text-xs text-zinc-400">
-            Tài khoản sau khi đăng ký sẽ tự động đồng bộ vào bảng staff_profiles
+            Sau khi đăng ký, vui lòng liên hệ quản lý để được cấp quyền nhân viên.
           </p>
         </div>
       </div>

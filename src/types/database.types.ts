@@ -37,7 +37,7 @@ export type OrderItemStatus =
   | 'SERVED'
   | 'CANCELLED';
 
-export type CookTimeEvaluation = 'ON_TIME' | 'WARNING' | 'LATE';
+export type CookTimeEvaluation = 'ON_TIME' | 'WARNING' | 'LATE' | 'NO_DATA';
 
 export type PickupSpeedEvaluation = 'EXCELLENT' | 'NORMAL' | 'SLOW' | 'NO_DATA';
 
@@ -50,11 +50,80 @@ export interface WebPushSubscriptionPayload {
   };
 }
 
+/** Private server transaction ledger; never a customer/API response type. */
+export interface OperationRequestRow {
+  id: string;
+  scope_key: string;
+  operation_id: string;
+  action: string;
+  request_hash: string;
+  session_id: string | null;
+  actor_id: string | null;
+  result: Json | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface NotificationOutboxRow {
+  id:string; dedupe_key:string; session_id:string|null; order_item_id:string|null;
+  kind:string; payload:Json; available_at:string; attempts:number;
+  lease_token:string|null; failed_at:string|null; outcome: 'SENT'|'SKIPPED'|'FAILED'|null;
+  locked_until:string|null; delivered_at:string|null; last_error:string|null; created_at:string;
+}
+
 // ============================================================================
-// SUPABASE DATABASE INTERFACE (8 BẢNG + VIEWS + RPC FUNCTIONS)
+// SUPABASE DATABASE INTERFACE (8 PUBLIC TABLES + PRIVATE LEDGER + VIEWS/RPC)
 // ============================================================================
 
 export type Database = {
+  private: {
+    Tables: {
+      request_limits: {
+        Row: {scope_key:string;window_seconds:number;window_start:string;hits:number;expires_at:string};
+        Insert: {scope_key:string;window_seconds:number;window_start:string;hits:number;expires_at:string};
+        Update: {hits?:number};
+        Relationships: [];
+      };
+      menu_image_uploads: {
+        Row: { id: string; actor_id: string; content_hash: string; object_path: string; public_url: string; state: 'UPLOADING' | 'READY' | 'DELETING' | 'DELETED'; created_at: string; updated_at: string };
+        Insert: { id: string; actor_id: string; content_hash: string; object_path: string; public_url: string; state: 'UPLOADING' | 'READY' | 'DELETING' | 'DELETED'; created_at?: string; updated_at?: string };
+        Update: { state?: 'UPLOADING' | 'READY' | 'DELETING' | 'DELETED'; updated_at?: string };
+        Relationships: [];
+      };
+      operation_requests: {
+        Row: OperationRequestRow;
+        Insert: Pick<OperationRequestRow, 'scope_key' | 'operation_id' | 'action' | 'request_hash'> &
+          Partial<Omit<OperationRequestRow, 'scope_key' | 'operation_id' | 'action' | 'request_hash'>>;
+        Update: Partial<OperationRequestRow>;
+        Relationships: [];
+      };
+      notification_receipts: {
+        Row: { outbox_id: string; staff_id: string; subscription_hash: string; accepted_at: string };
+        Insert: { outbox_id: string; staff_id: string; subscription_hash: string; accepted_at?: string };
+        Update: { accepted_at?: string };
+        Relationships: [];
+      };
+      notification_outbox: {
+        Row: NotificationOutboxRow;
+        Insert: Pick<NotificationOutboxRow,'dedupe_key'|'kind'|'payload'> & Partial<Omit<NotificationOutboxRow,'dedupe_key'|'kind'|'payload'>>;
+        Update: Partial<NotificationOutboxRow>;
+        Relationships: [];
+      };
+    };
+    Views: { [_ in never]: never };
+    Functions: {
+      begin_operation: {
+        Args: { p_scope_key: string; p_operation_id: string; p_action: string; p_request: Json; p_session_id: string | null; p_actor_id: string | null };
+        Returns: Json;
+      };
+      complete_operation: {
+        Args: { p_scope_key: string; p_operation_id: string; p_result: Json };
+        Returns: Json;
+      };
+    };
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
+  };
   public: {
     Tables: {
       zones: {
@@ -285,6 +354,7 @@ export type Database = {
           payment_code: string | null;
           total_amount: number;
           opened_at: string;
+          activated_at: string | null;
           closed_at: string | null;
         };
         Insert: {
@@ -300,6 +370,7 @@ export type Database = {
           payment_code?: string | null;
           total_amount?: number;
           opened_at?: string;
+          activated_at?: string | null;
           closed_at?: string | null;
         };
         Update: {
@@ -315,6 +386,7 @@ export type Database = {
           payment_code?: string | null;
           total_amount?: number;
           opened_at?: string;
+          activated_at?: string | null;
           closed_at?: string | null;
         };
         Relationships: [
@@ -336,6 +408,7 @@ export type Database = {
       };
       order_items: {
         Row: {
+          stock_export_log_id: string | null;
           id: string;
           session_id: string;
           menu_item_id: string;
@@ -356,6 +429,7 @@ export type Database = {
           cancel_reason: string | null;
         };
         Insert: {
+          stock_export_log_id?: string | null;
           id?: string;
           session_id: string;
           menu_item_id: string;
@@ -376,6 +450,7 @@ export type Database = {
           cancel_reason?: string | null;
         };
         Update: {
+          stock_export_log_id?: string | null;
           id?: string;
           session_id?: string;
           menu_item_id?: string;
@@ -396,6 +471,13 @@ export type Database = {
           cancel_reason?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: 'order_items_stock_export_log_id_fkey';
+            columns: ['stock_export_log_id'];
+            isOneToOne: false;
+            referencedRelation: 'inventory_logs';
+            referencedColumns: ['id'];
+          },
           {
             foreignKeyName: 'order_items_session_id_fkey';
             columns: ['session_id'];
@@ -495,6 +577,105 @@ export type Database = {
       };
     };
     Functions: {
+      fn_claim_notification_job: { Args: Record<string, never>; Returns: Json };
+      fn_prepare_notification_job: { Args: { p_id: string; p_lease: string }; Returns: Json };
+      fn_ack_notification_recipient: { Args: { p_id: string; p_lease: string; p_staff_id: string; p_hash: string; p_expired?: boolean }; Returns: undefined };
+      fn_finish_notification_job: { Args: { p_id: string; p_lease: string; p_retry: boolean; p_error?: string | null }; Returns: string };
+      fn_set_push_subscription: { Args: { p_actor_id: string; p_subscription: Json; p_expected_endpoint?: string | null }; Returns: undefined };
+      fn_admin_notification_jobs: { Args: { p_actor_id: string; p_retry_id?: string | null; p_expected_attempts?: number | null }; Returns: Json };
+      fn_realtime_receive_allowed: { Args: { p_topic: string }; Returns: boolean };
+      fn_admin_data_health: { Args: { p_actor_id: string }; Returns: Json };
+      fn_confirm_manual_payment: { Args: { p_actor_id: string; p_operation_id: string; p_command: Json }; Returns: Json };
+      fn_get_manual_payment_operation: { Args: { p_actor_id: string; p_operation_id: string }; Returns: Json };
+      fn_manual_payment_status: { Args: { p_actor_id: string; p_pending_page?: number; p_history_page?: number }; Returns: Json };
+      fn_takeaway_request_gate: { Args: {p_fingerprint:string;p_network_minute?:number;p_network_hour?:number;p_global_minute?:number;p_global_hour?:number}; Returns: Json };
+      fn_create_takeaway: { Args: { p_token: string; p_operation_id: string; p_command: Json }; Returns: Json };
+      fn_get_takeaway_create: { Args: { p_token: string; p_operation_id: string }; Returns: Json };
+      fn_get_takeaway_snapshot: { Args: { p_token: string }; Returns: Json };
+      fn_pickup_takeaway: { Args: { p_actor_id: string; p_operation_id: string; p_session_id: string }; Returns: Json };
+      fn_get_takeaway_pickup: { Args: { p_actor_id: string; p_operation_id: string }; Returns: Json };
+      fn_takeaway_pickup_list: { Args: { p_actor_id: string; p_page?: number }; Returns: Json };
+      fn_get_peak_hours_kpi: { Args: { p_start_date?: string; p_end_date?: string }; Returns: { hour_of_day: number; total_orders_count: number; total_items_quantity: number; total_order_value: number }[] };
+      fn_get_dine_in_snapshot: {
+        Args: { p_token: string };
+        Returns: Json;
+      };
+      fn_return_beer: {
+        Args: { p_actor_id: string; p_session_id: string; p_operation_id: string; p_input: Json };
+        Returns: Json;
+      };
+      fn_menu_action: {
+        Args: { p_actor_id: string; p_operation_id: string; p_command: Json };
+        Returns: Json;
+      };
+      fn_menu_image_upload: {
+        Args: { p_actor_id: string; p_id: string; p_hash: string; p_url: string; p_action: string };
+        Returns: Json;
+      };
+      fn_claim_menu_image_cleanup: { Args: { p_actor_id: string }; Returns: Json };
+      fn_finish_menu_image_cleanup: { Args: { p_actor_id: string; p_id: string }; Returns: undefined };
+      fn_admin_metadata_action: {
+        Args: { p_actor_id: string; p_operation_id: string; p_command: Json };
+        Returns: Json;
+      };
+      fn_get_admin_metadata_operation: {
+        Args: { p_actor_id: string; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_get_menu_action_operation: {
+        Args: { p_actor_id: string; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_get_session_bill: {
+        Args: { p_actor_id: string; p_session_id: string };
+        Returns: Json;
+      };
+      fn_session_action: {
+        Args: { p_actor_id: string | null; p_session_token: string | null; p_operation_id: string; p_action: string; p_input: Json };
+        Returns: Json;
+      };
+      fn_transition_order_items: {
+        Args: { p_actor_id: string; p_operation_id: string; p_command: Json };
+        Returns: Json;
+      };
+      fn_get_item_action_operation: {
+        Args: { p_actor_id: string; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_get_session_action_operation: {
+        Args: { p_actor_id: string | null; p_session_token: string | null; p_session_id: string | null; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_get_beer_return_operation: {
+        Args: { p_actor_id: string; p_session_id: string; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_admin_record_inventory: {
+        Args: { p_actor_id: string; p_operation_id: string; p_input: Json };
+        Returns: Json;
+      };
+      fn_admin_get_inventory_operation: {
+        Args: { p_actor_id: string; p_operation_id: string };
+        Returns: Json;
+      };
+      fn_submit_dine_in_order: {
+        Args: { p_session_id:string; p_session_token:string|null; p_actor_id:string|null; p_operation_id:string; p_lines:Json };
+        Returns: Json;
+      };
+      fn_get_dine_in_operation: {
+        Args: { p_session_id:string; p_session_token:string|null; p_actor_id:string|null; p_operation_id:string };
+        Returns: Json;
+      };
+      fn_admin_save_staff: {
+        Args: { p_actor_id: string; p_profile: Json; p_expected: Json };
+        Returns: {
+          id: string;
+          full_name: string;
+          role: StaffRole;
+          assigned_zone_id: string | null;
+          is_active: boolean;
+        }[];
+      };
       fn_get_financial_kpi: {
         Args: {
           p_start_date?: string;

@@ -43,3 +43,20 @@ body {
     margin: 0;
   }
 }
+
+/* Customer scope only: readable type, touch targets, safe-area and motion. */
+.customer-app { font-size:16px; line-height:1.5; overflow-wrap:anywhere; }
+.customer-app input, .customer-app textarea, .customer-app select { font-size:16px; }
+.customer-app button { min-height:48px; min-width:48px; }
+.customer-app :focus-visible { outline:3px solid #fbbf24; outline-offset:3px; }
+.customer-app .text-xs, .customer-app .text-\[10px\], .customer-app .text-\[11px\] { font-size:14px; }
+.customer-app .text-sm { font-size:16px; }
+.customer-app .safe-bottom { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+@media (prefers-reduced-motion:reduce) { .customer-app *, .customer-app *::before, .customer-app *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+
+.customer-app .customer-bottom-nav { min-height:72px; padding-bottom:calc(8px + env(safe-area-inset-bottom)); }
+
+.operations-app button { min-height:48px; min-width:48px; }
+.operations-app input,.operations-app textarea { font-size:16px; }
+.operations-app .text-\[11px\],.operations-app .text-xs { font-size:14px; }
+.operations-app :focus-visible { outline:3px solid #fbbf24; outline-offset:3px; }

@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { UserButton } from '@clerk/nextjs';
 import {
@@ -13,13 +12,16 @@ import {
   LayoutGrid,
   ShieldCheck,
 } from 'lucide-react';
-import { syncClerkStaffToSupabase } from '@/lib/supabase/sync-staff';
+import { requireStaffPage } from '@/lib/auth/staff-guard';
 
 interface AdminLayoutProps {
   children: ReactNode;
 }
 
 const ADMIN_NAV_ITEMS = [
+  { href: '/admin/payments', label: 'Xác nhận thu tiền', icon: Receipt, description: 'Đối chiếu & lịch sử người xác nhận' },
+  { href: '/admin/release', label: 'Đối soát', icon: ShieldCheck, description: 'Kiểm tra dữ liệu trước vận hành' },
+  { href: '/admin/notifications', label: 'Thông báo', icon: ShieldCheck, description: 'Theo dõi gửi & xử lý lỗi' },
   {
     href: '/admin',
     label: 'Dashboard KPI',
@@ -53,16 +55,7 @@ const ADMIN_NAV_ITEMS = [
 ] as const;
 
 export default async function AdminLayout({ children }: AdminLayoutProps) {
-  // Đồng bộ tài khoản Clerk với bảng staff_profiles và kiểm tra chặt chẽ quyền truy cập từ Database
-  const { role } = await syncClerkStaffToSupabase();
-
-  if (role === 'staff') {
-    redirect('/staff');
-  }
-
-  if (role === 'kitchen') {
-    redirect('/kitchen');
-  }
+  await requireStaffPage(['admin']);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col md:flex-row">

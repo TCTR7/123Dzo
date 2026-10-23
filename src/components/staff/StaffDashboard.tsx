@@ -1,8 +1,18 @@
 'use client';
+import { PushControls } from '@/components/ui/PushControls';
+import { SoundControls } from '@/components/ui/SoundControls';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import type { PublicMenuItem as MenuItemRow, StaffDirectoryEntry as StaffProfileRow, StaffSession as TableSessionRow } from '@/lib/data/read-contracts';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { pendingBeerReturn, submitBeerReturn, acknowledgeBeerReturn } from '@/lib/returns/client';
+import { pendingSessionAction, submitSessionAction, acknowledgeSessionAction, SessionActionError } from '@/lib/sessions/client';
+import type { SessionCommand } from '@/lib/sessions/contracts';
+import { useSessionBill } from '@/lib/sessions/use-session-bill';
+import { useItemActions } from '@/lib/item-actions/use-item-actions';
+import { ItemActionFeedback } from '@/components/staff/ItemActionFeedback';
 import { UserButton } from '@clerk/nextjs';
 import {
   BellRing,
@@ -16,29 +26,26 @@ import {
   Beer,
   Receipt,
   Ban,
-  Volume2,
   X,
   Clock,
   ExternalLink,
   BarChart3,
   ChefHat,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { acknowledgeOrder, pendingOrder, submitOrder, OrderSubmissionError } from '@/lib/orders/client';
+import type { DisplayOrderItem as OrderItemRow } from '@/lib/orders/contracts';
+import { useServerRefresh } from '@/lib/data/use-server-refresh';
+import { useSnapshotSound } from '@/lib/data/use-snapshot-sound';
 import {
   formatVND,
-  playNotificationSound,
   getElapsedMinutes,
   cn,
 } from '@/lib/utils';
 import type {
   IngredientRow,
-  MenuItemRow,
-  OrderItemRow,
   PaymentMethod,
-  StaffProfileRow,
   StaffRole,
   TableRow,
-  TableSessionRow,
   ZoneRow,
 } from '@/types/database.types';
 
@@ -48,50 +55,48 @@ interface StaffDashboardProps {
   initialSessions: TableSessionRow[];
   initialOrderItems: OrderItemRow[];
   menuItems: MenuItemRow[];
-  initialIngredients: IngredientRow[];
+  initialIngredients?: IngredientRow[];
   staffProfiles: StaffProfileRow[];
   currentStaffId: string | null;
   currentStaffRole: StaffRole;
 }
 
-function generateSessionToken(): string {
-  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let token = '';
-  for (let i = 0; i < 10; i += 1) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
-
-function generatePaymentCode(): string {
-  return `DZO${Date.now().toString(36).toUpperCase()}${Math.random()
-    .toString(36)
-    .slice(2, 5)
-    .toUpperCase()}`;
-}
-
+const QUEUED_CANCEL_REASON = 'Khách đổi ý khi món đang chờ bếp';
 export function StaffDashboard({
   initialZones,
   initialTables,
   initialSessions,
   initialOrderItems,
   menuItems,
-  initialIngredients,
   staffProfiles,
   currentStaffId,
   currentStaffRole,
 }: StaffDashboardProps) {
-  const supabase = createSupabaseBrowserClient();
+  const router = useRouter();
+  const itemActions = useItemActions(currentStaffId);
+  const [cancelTarget, setCancelTarget] = useState<OrderItemRow | null>(null);
+  const [itemCancelReason, setItemCancelReason] = useState('');
+  useEffect(() => { if (itemActions.pending) setCancelTarget(null); }, [itemActions.pending]);
+  const returnSubmitLock = useRef(false);
+  const [unconfirmedReturn, setUnconfirmedReturn] = useState(false);
+  const [returnJournalBlocked, setReturnJournalBlocked] = useState(false);
+  const [returnUnusedConfirmed, setReturnUnusedConfirmed] = useState(false);
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
+  const sessionActionLock = useRef(false);
+  const [sessionActionPending, setSessionActionPending] = useState(false);
+  const [paymentReceived, setPaymentReceived] = useState(false);
+  const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
 
-  const [zones] = useState<ZoneRow[]>(initialZones);
+  const [zones, setZones] = useState<ZoneRow[]>(initialZones);
+  useEffect(() => { setZones(initialZones); }, [initialZones]);
   const [tables, setTables] = useState<TableRow[]>(initialTables);
   const [sessions, setSessions] = useState<TableSessionRow[]>(initialSessions);
   const [orderItems, setOrderItems] =
     useState<OrderItemRow[]>(initialOrderItems);
-  const [ingredients, setIngredients] =
-    useState<IngredientRow[]>(initialIngredients);
 
   const [selectedZoneId, setSelectedZoneId] = useState<string>('ALL');
+  const [workScope, setWorkScope] = useState<'MY'|'ALL'>(currentStaffRole==='admin'?'ALL':'MY');
+  const [servingItemId,setServingItemId]=useState<string|null>(null);
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [qrModalSession, setQrModalSession] =
     useState<TableSessionRow | null>(null);
@@ -125,9 +130,97 @@ export function StaffDashboard({
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] =
     useState<PaymentMethod>('CASH');
 
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isSubmittingOther, setIsSubmitting] = useState<boolean>(false);
+  const isSubmitting = isSubmittingOther || itemActions.busy;
+  const orderSubmitLock=useRef(false);
+  const [unconfirmedStaffOrder,setUnconfirmedStaffOrder]=useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [originUrl, setOriginUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!currentStaffId) return;
+    try { setSessionActionPending(pendingSessionAction({ mode: 'staff', identity: currentStaffId }) !== null); }
+    catch (error) { setSessionActionPending(true); setErrorMessage(error instanceof Error ? error.message : 'Không đọc được thao tác bàn.'); }
+  }, [currentStaffId]);
+  useEffect(() => {
+    const opened = initialSessions.find((row) => row.id === openedSessionId);
+    if (opened) { setQrModalSession(opened); setOpenedSessionId(null); }
+  }, [initialSessions, openedSessionId]);
+
+  async function runSessionCommand(command?: SessionCommand) {
+    if (!currentStaffId || sessionActionLock.current || isSubmitting || unconfirmedReturn || returnJournalBlocked ||
+      (command && (sessionActionPending || itemActions.blocked))) return;
+    sessionActionLock.current = true;
+    setIsSubmitting(true); setErrorMessage(null);
+    const scope = { mode: 'staff' as const, identity: currentStaffId };
+    try {
+      const { result } = await submitSessionAction(scope, command);
+      acknowledgeSessionAction(scope, result.operationId);
+      if (result.action === 'OPEN') setOpenedSessionId(result.sessionId);
+      setActiveTableId(result.action === 'CLOSE' ? null : result.tableId);
+      setIsTransferModalOpen(false); setIsHandoverModalOpen(false); setIsCheckoutModalOpen(false);
+      setPaymentReceived(false); router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Chưa xác nhận thao tác bàn.');
+      if (error instanceof SessionActionError && error.totalAmount !== undefined && command && 'sessionId' in command.input) {
+        const id = command.input.sessionId, total = error.totalAmount;
+        setSessions((previous) => previous.map((row) => row.id === id ? { ...row, total_amount: total } : row));
+        setPaymentReceived(false);
+      } else router.refresh();
+    } finally {
+      try { setSessionActionPending(pendingSessionAction(scope) !== null); } catch { setSessionActionPending(true); }
+      sessionActionLock.current = false; setIsSubmitting(false);
+    }
+  }
+
+  useEffect(() => { setOrderItems(initialOrderItems); }, [initialOrderItems]);
+  useEffect(() => { setSessions(initialSessions); }, [initialSessions]);
+  useEffect(() => { setTables(initialTables); }, [initialTables]);
+  useEffect(() => {
+    setUnconfirmedReturn(false);
+    setReturnJournalBlocked(false);
+    if (!currentStaffId) { setReturnJournalBlocked(true); return; }
+    try { setUnconfirmedReturn(pendingBeerReturn(currentStaffId) !== null); }
+    catch (error) {
+      setReturnJournalBlocked(true);
+      setErrorMessage(error instanceof Error ? error.message : 'Không đọc được lượt trả bia.');
+    }
+  }, [currentStaffId]);
+
+  async function runBeerReturn() {
+    if (!currentStaffId || returnSubmitLock.current || returnJournalBlocked || isSubmitting) return;
+    returnSubmitLock.current = true;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setReturnNotice(null);
+    try {
+      const item = orderItems.find((row) => row.id === selectedReturnOrderItemId);
+      if (!unconfirmedReturn && (!activeTableSession || !item || !returnUnusedConfirmed)) {
+        throw new Error('Chọn dòng bia và xác nhận hàng còn nguyên, chưa sử dụng.');
+      }
+      const result = await submitBeerReturn(currentStaffId, unconfirmedReturn ? undefined : {
+        sessionId: activeTableSession!.id, orderItemId: item!.id, quantity: Number(returnBeerQuantity),
+        expectedQuantity: item!.quantity, confirmedUnused: true,
+      });
+      acknowledgeBeerReturn(currentStaffId, result.operationId);
+      setIsReturnBeerModalOpen(false);
+      setReturnUnusedConfirmed(false);
+      setReturnNotice('Đã xác nhận trả bia. Số lượng và hóa đơn được tải lại từ quán.');
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Chưa xác nhận được trả bia.');
+      // Refresh expected quantity after a confirmed rejection, never apply a replay snapshot locally.
+      router.refresh();
+    } finally {
+      try {
+        const pending = pendingBeerReturn(currentStaffId) !== null;
+        setUnconfirmedReturn(pending);
+        if (pending) setIsReturnBeerModalOpen(false);
+      } catch { setReturnJournalBlocked(true); }
+      returnSubmitLock.current = false;
+      setIsSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -154,12 +247,6 @@ export function StaffDashboard({
     return map;
   }, [menuItems]);
 
-  const ingredientMap = useMemo(() => {
-    const map = new Map<string, IngredientRow>();
-    ingredients.forEach((ing) => map.set(ing.id, ing));
-    return map;
-  }, [ingredients]);
-
   const tableMap = useMemo(() => {
     const map = new Map<string, TableRow>();
     tables.forEach((t) => map.set(t.id, t));
@@ -182,120 +269,27 @@ export function StaffDashboard({
     return map;
   }, [sessions]);
 
-  // Tính lại tổng tiền phiên bàn từ các order_items hợp lệ (status !== 'CANCELLED')
-  const recalculateSessionTotal = useCallback(
-    async (sessionId: string, currentItems: OrderItemRow[]) => {
-      const validTotal = currentItems
-        .filter((i) => i.session_id === sessionId && i.status !== 'CANCELLED')
-        .reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
-
-      const { data } = await supabase
-        .from('table_sessions')
-        .update({ total_amount: validTotal })
-        .eq('id', sessionId)
-        .select('*')
-        .single();
-
-      if (data) {
-        setSessions((prev) => prev.map((s) => (s.id === data.id ? data : s)));
-      }
-    },
-    [supabase]
-  );
-
-  // ==========================================================================
-  // LẮNG NGHE SUPABASE REALTIME (ORDER_ITEMS & TABLE_SESSIONS) + DỌN DẸP KÊNH
-  // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('staff-realtime-channel')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            setOrderItems((prev) => {
-              if (prev.some((i) => i.id === newItem.id)) return prev;
-              return [newItem, ...prev];
-            });
-            if (newItem.status === 'READY') {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            const oldItem = payload.old as Partial<OrderItemRow>;
-            setOrderItems((prev) =>
-              prev.map((i) => (i.id === updatedItem.id ? updatedItem : i))
-            );
-            if (
-              updatedItem.status === 'READY' &&
-              oldItem.status !== 'READY'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string }).id;
-            if (deletedId) {
-              setOrderItems((prev) => prev.filter((i) => i.id !== deletedId));
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newSession = payload.new as TableSessionRow;
-            setSessions((prev) => {
-              if (prev.some((s) => s.id === newSession.id)) return prev;
-              return [newSession, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedSession = payload.new as TableSessionRow;
-            const oldSession = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) =>
-              prev.map((s) =>
-                s.id === updatedSession.id ? updatedSession : s
-              )
-            );
-            // Phát chuông khi khách bấm "Gọi tính tiền" (REQUEST_BILL)
-            if (
-              updatedSession.status === 'REQUEST_BILL' &&
-              oldSession.status !== 'REQUEST_BILL'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    // Bắt buộc dọn dẹp kết nối Realtime khi unmount theo Mục 2.2 AGENTS.md
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
+  useServerRefresh(15000, currentStaffId);
+  useSnapshotSound([
+    ...initialOrderItems.filter(item => item.quantity > 0 && item.status === 'READY' && initialSessions.some(session => session.id === item.session_id &&
+      (session.status === 'ACTIVE' || session.status === 'REQUEST_BILL') && session.assigned_staff_id === currentStaffId)).map(item => `ready:${item.id}`),
+    ...initialSessions.filter(session => session.status === 'REQUEST_BILL' && session.assigned_staff_id === currentStaffId).map(session => `bill:${session.id}`),
+  ]);
 
   // Danh sách các món đã chín / đồ uống lấy ngay (status === 'READY') đang chờ bưng
   const readyOrderItems = useMemo(() => {
     return orderItems
-      .filter((item) => item.status === 'READY')
+      .filter((item) => {
+        const session=sessionMap.get(item.session_id);
+        return item.quantity>0&&item.status==='READY'&&item.ready_at&&session&&
+          (session.status==='ACTIVE'||session.status==='REQUEST_BILL')&&(workScope==='ALL'||session.assigned_staff_id===currentStaffId);
+      })
       .sort((a, b) => {
         const timeA = new Date(a.ready_at ?? a.created_at).getTime();
         const timeB = new Date(b.ready_at ?? b.created_at).getTime();
         return timeA - timeB;
       });
-  }, [orderItems]);
+  }, [orderItems, sessionMap, workScope, currentStaffId]);
 
   const filteredTables = useMemo(() => {
     if (selectedZoneId === 'ALL') return tables;
@@ -306,6 +300,24 @@ export function StaffDashboard({
   const activeTableSession = activeTable
     ? sessionByTableId.get(activeTable.id) ?? null
     : null;
+  const billDetail = useSessionBill(activeTableSession?.id ?? null, initialOrderItems);
+  useEffect(() => { setPaymentReceived(false); }, [activeTableSession?.id, activeTableSession?.total_amount, checkoutPaymentMethod]);
+  useEffect(() => {
+    const bill = billDetail.data;
+    if (!bill) return;
+    setOrderItems((previous) => [...previous.filter((row) => row.session_id !== bill.sessionId), ...bill.items]);
+    setSessions((previous) => previous.map((row) => row.id === bill.sessionId ? { ...row, total_amount: bill.totalAmount, status: bill.status, closed_at: bill.closedAt } : row));
+  }, [billDetail.data]);
+
+  useEffect(()=>{
+    if (!activeTableSession?.id || !currentStaffId) { setUnconfirmedStaffOrder(false); return; }
+    try {
+      setUnconfirmedStaffOrder(pendingOrder({mode:'staff',identity:currentStaffId,sessionId:activeTableSession.id})!==null);
+    } catch(error) {
+      setUnconfirmedStaffOrder(true);
+      setErrorMessage(error instanceof Error?error.message:'Không khôi phục được lượt gọi hộ.');
+    }
+  },[activeTableSession?.id,currentStaffId]);
 
   const activeTableOrders = useMemo(() => {
     if (!activeTableSession) return [];
@@ -320,201 +332,58 @@ export function StaffDashboard({
   // 1. MỞ BÀN MỚI & SINH SESSION_TOKEN QR ĐỘNG (MỤC 3.1)
   // ==========================================================================
   async function handleOpenTable(table: TableRow) {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const token = generateSessionToken();
-      const paymentCode = generatePaymentCode();
-
-      const { data: createdSession, error: sessionError } = await supabase
-        .from('table_sessions')
-        .insert({
-          session_token: token,
-          session_type: 'DINE_IN',
-          table_id: table.id,
-          assigned_staff_id: validCurrentStaffId,
-          status: 'ACTIVE',
-          payment_code: paymentCode,
-          total_amount: 0,
-          opened_at: new Date().toISOString(),
-        })
-        .select('*')
-        .single();
-
-      if (sessionError || !createdSession) {
-        throw new Error(sessionError?.message ?? 'Không thể mở phiên bàn mới');
-      }
-
-      const { data: updatedTable, error: tableError } = await supabase
-        .from('tables')
-        .update({
-          status: 'OCCUPIED',
-          current_session_id: createdSession.id,
-        })
-        .eq('id', table.id)
-        .select('*')
-        .single();
-
-      if (tableError || !updatedTable) {
-        throw new Error(
-          tableError?.message ?? 'Không thể cập nhật trạng thái bàn'
-        );
-      }
-
-      setSessions((prev) => [createdSession, ...prev]);
-      setTables((prev) =>
-        prev.map((t) => (t.id === updatedTable.id ? updatedTable : t))
-      );
-      setActiveTableId(updatedTable.id);
-      setQrModalSession(createdSession);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi mở bàn');
-    } finally {
-      setIsSubmitting(false);
-    }
+    await runSessionCommand({action:'OPEN',input:{tableId:table.id}});
   }
 
   // ==========================================================================
   // 2. BẤM "ĐÃ BƯNG LÊN BÀN" (CẬP NHẬT SERVED_AT & SERVED_BY_STAFF_ID - MỤC 2.2 & 3.3)
   // ==========================================================================
   async function handleServeOrderItem(item: OrderItemRow) {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const nowIso = new Date().toISOString();
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'SERVED',
-          served_at: nowIso,
-          served_by_staff_id: validCurrentStaffId,
-        })
-        .eq('id', item.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(error?.message ?? 'Không thể xác nhận đã bưng món');
-      }
-
-      setOrderItems((prev) =>
-        prev.map((oi) => (oi.id === data.id ? data : oi))
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi cập nhật trạng thái phục vụ'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (isSubmitting || itemActions.blocked || item.quantity <= 0 || item.status !== 'READY' || unconfirmedReturn || sessionActionPending) return;
+    setServingItemId(item.id);
+    try {await itemActions.run({action:'SERVE',reason:'',items:[{id:item.id,sessionId:item.session_id,expectedStatus:'READY',expectedQuantity:item.quantity}]});}
+    finally {setServingItemId(null);}
   }
 
   // ==========================================================================
   // 3. ORDER HỘ KHÁCH (SNAPSHOT PRICE & BAR_INSTANT -> READY NGAY)
   // ==========================================================================
-  async function handleStaffAddOrderItem(menuItem: MenuItemRow) {
-    if (!activeTableSession || isSubmitting) return;
-
-    // Kiểm tra chặt chẽ trạng thái phiên bàn trước khi thêm món
-    if (activeTableSession.status !== 'ACTIVE') {
-      setErrorMessage(
-        'Chỉ được đặt thêm món khi phiên bàn đang ở trạng thái ACTIVE.'
-      );
-      return;
-    }
-
-    const qty = Math.max(1, selectedMenuQty[menuItem.id] ?? 1);
-    const note = (selectedMenuNote[menuItem.id] ?? '').trim() || null;
-    const isInstantBar = menuItem.station === 'BAR_INSTANT';
-    const nowIso = new Date().toISOString();
-
+  async function handleStaffAddOrderItem(menuItem?: MenuItemRow) {
+    if (!activeTableSession || !currentStaffId || isSubmitting || orderSubmitLock.current || unconfirmedReturn || itemActions.blocked || sessionActionPending || sessionActionLock.current) return;
+    if (unconfirmedStaffOrder && menuItem) return;
+    if (!unconfirmedStaffOrder && !menuItem) return;
+    const scope={mode:'staff' as const,identity:currentStaffId,sessionId:activeTableSession.id};
+    orderSubmitLock.current=true;
     setIsSubmitting(true);
     setErrorMessage(null);
-
     try {
-      // Bắt buộc copy price -> unit_price và cost_price -> unit_cost_price (Snapshot Price)
-      // Nếu station === 'BAR_INSTANT', set thẳng status = 'READY' và ready_at = NOW()
-      const { data: insertedItem, error: insertError } = await supabase
-        .from('order_items')
-        .insert({
-          session_id: activeTableSession.id,
-          menu_item_id: menuItem.id,
-          quantity: qty,
-          note,
-          station: menuItem.station,
-          status: isInstantBar ? 'READY' : 'QUEUED',
-          unit_price: menuItem.price,
-          unit_cost_price: menuItem.cost_price,
-          created_at: nowIso,
-          ready_at: isInstantBar ? nowIso : null,
-        })
-        .select('*')
-        .single();
-
-      if (insertError || !insertedItem) {
-        throw new Error(insertError?.message ?? 'Không thể thêm món vào bàn');
-      }
-
-      // Nếu món có liên kết kho nguyên liệu (VD: Bia / Nước ngọt), tự động trừ kho & ghi log EXPORT_SALE
-      if (menuItem.linked_ingredient_id) {
-        const linkedIng = ingredientMap.get(menuItem.linked_ingredient_id);
-        if (linkedIng) {
-          const updatedStock = Math.max(0, linkedIng.stock_quantity - qty);
-          const { data: updatedIng } = await supabase
-            .from('ingredients')
-            .update({ stock_quantity: updatedStock })
-            .eq('id', linkedIng.id)
-            .select('*')
-            .single();
-
-          if (updatedIng) {
-            setIngredients((prev) =>
-              prev.map((i) => (i.id === updatedIng.id ? updatedIng : i))
-            );
-          }
-
-          await supabase.from('inventory_logs').insert({
-            ingredient_id: linkedIng.id,
-            type: 'EXPORT_SALE',
-            quantity_change: -qty,
-            total_cost: qty * linkedIng.unit_cost,
-            note: `Xuất bán ${qty} ${linkedIng.unit} (${menuItem.name}) cho ${
-              activeTable?.table_number ?? 'Bàn'
-            }`,
-            created_by: validCurrentStaffId,
-          });
-        }
-      }
-
-      // Nếu là món BAR_INSTANT, gọi thông báo đẩy cho nhân viên phụ trách bàn
-      if (isInstantBar) {
-        void fetch('/api/push/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderItemId: insertedItem.id,
-            sessionId: activeTableSession.id,
-            title: `${activeTable?.table_number ?? 'Bàn'}: Đồ uống lấy ngay`,
-            body: `${qty}x ${menuItem.name} cần mang ra bàn`,
-          }),
-        }).catch(() => undefined);
-      }
-
-      const nextItems = [insertedItem, ...orderItems];
-      setOrderItems(nextItems);
-      await recalculateSessionTotal(activeTableSession.id, nextItems);
-
-      setSelectedMenuQty((prev) => ({ ...prev, [menuItem.id]: 1 }));
-      setSelectedMenuNote((prev) => ({ ...prev, [menuItem.id]: '' }));
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi đặt món hộ khách'
-      );
+      const {result,submittedLines,recovered}=await submitOrder(scope,menuItem?[{menu_item_id:menuItem.id,quantity:Math.max(1,selectedMenuQty[menuItem.id]??1),
+        note:selectedMenuNote[menuItem.id]??'',expected_price:menuItem.price}]:[]);
+      setOrderItems((previous)=>{
+        const existing=new Set(previous.map((item)=>item.id));
+        return [...result.items.filter((item)=>!existing.has(item.id)),...previous];
+      });
+      // Session total is calculated by the RPC, never by a truncated browser list.
+      if (!recovered) setSessions((previous)=>previous.map((item)=>item.id===result.sessionId?{...item,total_amount:result.totalAmount}:item));
+      acknowledgeOrder(scope,result.operationId);
+      setUnconfirmedStaffOrder(false);
+      setSelectedMenuQty((previous)=>{
+        const next={...previous};
+        submittedLines.forEach((line)=>{next[line.menu_item_id]=1;});
+        return next;
+      });
+      setSelectedMenuNote((previous)=>{
+        const next={...previous};
+        submittedLines.forEach((line)=>{next[line.menu_item_id]='';});
+        return next;
+      });
+    } catch(error) {
+      try { setUnconfirmedStaffOrder(pendingOrder(scope)!==null); } catch { setUnconfirmedStaffOrder(true); }
+      setErrorMessage(error instanceof OrderSubmissionError && error.code==='PRICE_CHANGED'
+        ? 'Giá món đã đổi. Vui lòng tải lại trang và kiểm tra trước khi gọi hộ.'
+        : error instanceof Error?error.message:'Chưa xác nhận được lượt gọi hộ.');
     } finally {
+      orderSubmitLock.current=false;
       setIsSubmitting(false);
     }
   }
@@ -524,81 +393,8 @@ export function StaffDashboard({
   // ==========================================================================
   async function handleTransferTable(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (
-      !activeTable ||
-      !activeTableSession ||
-      !targetTransferTableId ||
-      isSubmitting
-    ) {
-      return;
-    }
-
-    const targetTable = tableMap.get(targetTransferTableId);
-    if (!targetTable || targetTable.status !== 'AVAILABLE') {
-      setErrorMessage('Bàn đích không hợp lệ hoặc đang có khách.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      // 1. Cập nhật table_id trong bảng table_sessions
-      const { data: updatedSession, error: sessionErr } = await supabase
-        .from('table_sessions')
-        .update({ table_id: targetTable.id })
-        .eq('id', activeTableSession.id)
-        .select('*')
-        .single();
-
-      if (sessionErr || !updatedSession) {
-        throw new Error(sessionErr?.message ?? 'Không thể chuyển phiên bàn');
-      }
-
-      // 2. Giải phóng bàn cũ về AVAILABLE
-      const { data: oldTableData, error: oldTableErr } = await supabase
-        .from('tables')
-        .update({ status: 'AVAILABLE', current_session_id: null })
-        .eq('id', activeTable.id)
-        .select('*')
-        .single();
-
-      if (oldTableErr || !oldTableData) {
-        throw new Error(oldTableErr?.message ?? 'Không thể giải phóng bàn cũ');
-      }
-
-      // 3. Đánh dấu bàn mới là OCCUPIED
-      const { data: newTableData, error: newTableErr } = await supabase
-        .from('tables')
-        .update({
-          status: 'OCCUPIED',
-          current_session_id: updatedSession.id,
-        })
-        .eq('id', targetTable.id)
-        .select('*')
-        .single();
-
-      if (newTableErr || !newTableData) {
-        throw new Error(newTableErr?.message ?? 'Không thể cập nhật bàn mới');
-      }
-
-      setSessions((prev) =>
-        prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
-      );
-      setTables((prev) =>
-        prev.map((t) => {
-          if (t.id === oldTableData.id) return oldTableData;
-          if (t.id === newTableData.id) return newTableData;
-          return t;
-        })
-      );
-      setActiveTableId(newTableData.id);
-      setIsTransferModalOpen(false);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi chuyển bàn');
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (!activeTableSession || !activeTable || !targetTransferTableId) return;
+    await runSessionCommand({action:'TRANSFER',input:{sessionId:activeTableSession.id,expectedTableId:activeTable.id,targetTableId:targetTransferTableId}});
   }
 
   // ==========================================================================
@@ -606,34 +402,8 @@ export function StaffDashboard({
   // ==========================================================================
   async function handleHandoverTable(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!activeTableSession || !targetHandoverStaffId || isSubmitting) return;
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const { data, error } = await supabase
-        .from('table_sessions')
-        .update({ assigned_staff_id: targetHandoverStaffId })
-        .eq('id', activeTableSession.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể bàn giao bàn cho đồng nghiệp'
-        );
-      }
-
-      setSessions((prev) => prev.map((s) => (s.id === data.id ? data : s)));
-      setIsHandoverModalOpen(false);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi bàn giao bàn'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (!activeTableSession || !targetHandoverStaffId) return;
+    await runSessionCommand({action:'HANDOVER',input:{sessionId:activeTableSession.id,expectedAssignedStaffId:activeTableSession.assigned_staff_id,assignedStaffId:targetHandoverStaffId}});
   }
 
   // ==========================================================================
@@ -641,187 +411,26 @@ export function StaffDashboard({
   // ==========================================================================
   async function handleReturnBeer(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!activeTableSession || !selectedReturnOrderItemId || isSubmitting) {
-      return;
-    }
-
-    const targetOrderItem = activeTableOrders.find(
-      (i) => i.id === selectedReturnOrderItemId
-    );
-    if (!targetOrderItem) {
-      setErrorMessage('Không tìm thấy dòng bia/đồ uống cần trả.');
-      return;
-    }
-
-    const returnQty = Math.floor(Number(returnBeerQuantity));
-    if (
-      Number.isNaN(returnQty) ||
-      returnQty <= 0 ||
-      returnQty > targetOrderItem.quantity
-    ) {
-      setErrorMessage(
-        `Số lượng trả phải từ 1 đến ${targetOrderItem.quantity}.`
-      );
-      return;
-    }
-
-    const menuItem = menuMap.get(targetOrderItem.menu_item_id);
-    const remainingQty = targetOrderItem.quantity - returnQty;
-    const nowIso = new Date().toISOString();
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      let updatedOrderItem: OrderItemRow;
-
-      if (remainingQty > 0) {
-        const { data, error } = await supabase
-          .from('order_items')
-          .update({ quantity: remainingQty })
-          .eq('id', targetOrderItem.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật số lượng bia');
-        }
-        updatedOrderItem = data;
-      } else {
-        // Nếu khách trả lại toàn bộ số lon của dòng order_items này
-        const { data, error } = await supabase
-          .from('order_items')
-          .update({
-            status: 'CANCELLED',
-            cancelled_at: nowIso,
-            cancelled_by: validCurrentStaffId,
-            cancel_reason: `Khách trả lại toàn bộ ${returnQty} lon/chai (${
-              menuItem?.name ?? 'Đồ uống'
-            })`,
-          })
-          .eq('id', targetOrderItem.id)
-          .select('*')
-          .single();
-
-        if (error || !data) {
-          throw new Error(error?.message ?? 'Không thể cập nhật trả hết bia');
-        }
-        updatedOrderItem = data;
-      }
-
-      // Tìm nguyên liệu kho tương ứng để cộng trả tồn kho & ghi log RETURN_BEER
-      const linkedIngredient =
-        (menuItem?.linked_ingredient_id
-          ? ingredientMap.get(menuItem.linked_ingredient_id)
-          : undefined) ??
-        ingredients.find(
-          (ing) =>
-            menuItem &&
-            ing.name.toLowerCase() === menuItem.name.toLowerCase()
-        );
-
-      if (linkedIngredient) {
-        const newStock = linkedIngredient.stock_quantity + returnQty;
-        const { data: updatedIng, error: ingError } = await supabase
-          .from('ingredients')
-          .update({ stock_quantity: newStock })
-          .eq('id', linkedIngredient.id)
-          .select('*')
-          .single();
-
-        if (ingError) {
-          throw new Error(
-            `Không thể hoàn trả tồn kho: ${ingError.message}`
-          );
-        }
-
-        if (updatedIng) {
-          setIngredients((prev) =>
-            prev.map((i) => (i.id === updatedIng.id ? updatedIng : i))
-          );
-        }
-
-        const { error: logError } = await supabase
-          .from('inventory_logs')
-          .insert({
-            ingredient_id: linkedIngredient.id,
-            type: 'RETURN_BEER',
-            quantity_change: returnQty,
-            total_cost: returnQty * linkedIngredient.unit_cost,
-            note: `Trả lại ${returnQty} ${linkedIngredient.unit} từ ${
-              activeTable?.table_number ?? 'Bàn'
-            }`,
-            created_by: validCurrentStaffId,
-          });
-
-        if (logError) {
-          throw new Error(
-            `Không thể ghi log RETURN_BEER: ${logError.message}`
-          );
-        }
-      }
-
-      const nextItems = orderItems.map((i) =>
-        i.id === updatedOrderItem.id ? updatedOrderItem : i
-      );
-      setOrderItems(nextItems);
-      await recalculateSessionTotal(activeTableSession.id, nextItems);
-      setIsReturnBeerModalOpen(false);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi xử lý trả bia thừa'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    await runBeerReturn();
   }
 
   // ==========================================================================
   // 7. HỦY MÓN ĐANG CHỜ (QUEUED) - TUÂN THỦ NGHIÊM NGẶT RBAC MỤC 7
   // ==========================================================================
   async function handleCancelQueuedItem(item: OrderItemRow) {
-    if (!activeTableSession || isSubmitting) return;
-
-    // Theo Mục 7 & Mục 3.2 AGENTS.md: Nhân viên (staff) tuyệt đối không được hủy món COOKING hoặc SERVED
-    if (item.status !== 'QUEUED' && currentStaffRole !== 'admin') {
-      setErrorMessage(
-        'Nhân viên phục vụ chỉ được hủy món khi còn đang chờ Bếp (QUEUED). Món đã nấu hoặc đã bưng chỉ Admin mới có quyền hủy.'
-      );
+    if (isSubmitting || itemActions.blocked || item.quantity <= 0 || item.status === 'CANCELLED' || unconfirmedReturn || sessionActionPending) return;
+    if (item.status !== 'QUEUED') {
+      if (currentStaffRole === 'admin') { setCancelTarget(item); setItemCancelReason(''); }
       return;
     }
+    await itemActions.run({action:'CANCEL',reason:QUEUED_CANCEL_REASON,items:[{id:item.id,sessionId:item.session_id,expectedStatus:'QUEUED',expectedQuantity:item.quantity}]});
+  }
 
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const nowIso = new Date().toISOString();
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'CANCELLED',
-          cancelled_at: nowIso,
-          cancelled_by: validCurrentStaffId,
-          cancel_reason:
-            item.status === 'QUEUED'
-              ? 'Khách đổi ý hủy món khi đang chờ bếp'
-              : 'Admin hủy món',
-        })
-        .eq('id', item.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(error?.message ?? 'Không thể hủy món');
-      }
-
-      const nextItems = orderItems.map((i) => (i.id === data.id ? data : i));
-      setOrderItems(nextItems);
-      await recalculateSessionTotal(activeTableSession.id, nextItems);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Lỗi khi hủy món');
-    } finally {
-      setIsSubmitting(false);
-    }
+  async function confirmAdvancedCancel(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const item=cancelTarget;
+    if (!item || item.status==='CANCELLED' || isSubmitting || !itemCancelReason.trim()) return;
+    if (await itemActions.run({action:'CANCEL',reason:itemCancelReason,items:[{id:item.id,sessionId:item.session_id,expectedStatus:item.status,expectedQuantity:item.quantity}]})) setCancelTarget(null);
   }
 
   // ==========================================================================
@@ -829,73 +438,17 @@ export function StaffDashboard({
   // ==========================================================================
   async function handleCloseSessionBill(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!activeTable || !activeTableSession || isSubmitting) return;
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
-      const validTotal = activeTableOrders
-        .filter((i) => i.status !== 'CANCELLED')
-        .reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
-
-      const nowIso = new Date().toISOString();
-
-      const { data: closedSession, error: sessionErr } = await supabase
-        .from('table_sessions')
-        .update({
-          status: 'CLOSED',
-          payment_method: checkoutPaymentMethod,
-          total_amount: validTotal,
-          closed_at: nowIso,
-        })
-        .eq('id', activeTableSession.id)
-        .select('*')
-        .single();
-
-      if (sessionErr || !closedSession) {
-        throw new Error(sessionErr?.message ?? 'Không thể chốt thanh toán');
-      }
-
-      const { data: freedTable, error: tableErr } = await supabase
-        .from('tables')
-        .update({
-          status: 'AVAILABLE',
-          current_session_id: null,
-        })
-        .eq('id', activeTable.id)
-        .select('*')
-        .single();
-
-      if (tableErr || !freedTable) {
-        throw new Error(tableErr?.message ?? 'Không thể giải phóng bàn');
-      }
-
-      setSessions((prev) =>
-        prev.map((s) => (s.id === closedSession.id ? closedSession : s))
-      );
-      setTables((prev) =>
-        prev.map((t) => (t.id === freedTable.id ? freedTable : t))
-      );
-      setIsCheckoutModalOpen(false);
-      setActiveTableId(null);
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi đóng phiên bàn'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (!activeTableSession || !paymentReceived || !billDetail.data || billDetail.loading || billDetail.error) return;
+    await runSessionCommand({action:'CLOSE',input:{sessionId:activeTableSession.id,paymentMethod:checkoutPaymentMethod,expectedTotal:activeTableSession.total_amount,confirmedReceived:true}});
   }
 
   const returnableDrinkItems = useMemo(() => {
     return activeTableOrders.filter((i) => {
-      if (i.status === 'CANCELLED') return false;
+      if (i.quantity <= 0 || !['READY','SERVED'].includes(i.status)) return false;
       const m = menuMap.get(i.menu_item_id);
       return (
-        i.station === 'BAR_INSTANT' ||
-        m?.category === 'BEER' ||
-        m?.category === 'DRINK'
+        i.station === 'BAR_INSTANT' &&
+        (m?.category === 'BEER' || m?.category === 'DRINK')
       );
     });
   }, [activeTableOrders, menuMap]);
@@ -908,7 +461,7 @@ export function StaffDashboard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <h1 className="text-xl font-bold text-amber-400">
-              123Dzô • Phục vụ Chạy bàn (Realtime)
+              123Dzô • Việc cần làm
             </h1>
             <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
               Role: {currentStaffRole}
@@ -920,14 +473,9 @@ export function StaffDashboard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
-            className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
-          >
-            <Volume2 className="h-4 w-4 text-amber-400" />
-            Kiểm tra chuông
-          </button>
+          <Link href="/staff/payments" className="min-h-12 inline-flex items-center px-4 rounded-xl border border-amber-500 text-amber-200 font-bold">Xác nhận thu tiền</Link>
+          <SoundControls />
+          {currentStaffId && <PushControls key={currentStaffId} userId={currentStaffId} />}
 
           {currentStaffRole === 'admin' && (
             <>
@@ -954,6 +502,42 @@ export function StaffDashboard({
         </div>
       </header>
 
+      <ItemActionFeedback pending={itemActions.pending} busy={itemActions.busy} error={itemActions.error} recover={() => itemActions.run()} />
+      {cancelTarget && <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" aria-label="Hủy món đã chuẩn bị" className="bg-zinc-900 rounded-2xl p-6 w-full max-w-md space-y-4">
+          <h3 className="text-lg font-bold">Lý do hủy món đã chuẩn bị</h3>
+          <form onSubmit={confirmAdvancedCancel} className="space-y-4">
+            <fieldset disabled={itemActions.blocked} className="space-y-4">
+              <label className="block">Lý do hủy *
+                <textarea required maxLength={500} value={itemCancelReason} onChange={(event) => setItemCancelReason(event.target.value)} className="w-full rounded-lg p-3 bg-zinc-800" />
+              </label>
+              {itemActions.error && <p role="alert" className="text-red-300">{itemActions.error}</p>}
+              <p className="text-sm text-zinc-400">Hủy món không tự hoàn kho. Bia còn nguyên cần dùng chức năng trả bia.</p>
+              <button type="button" onClick={() => setCancelTarget(null)} className="min-h-12 px-4">Quay lại</button>
+              <button type="submit" disabled={!itemCancelReason.trim()} className="min-h-12 px-4 rounded-lg bg-red-700">Xác nhận hủy món</button>
+            </fieldset>
+          </form>
+        </div>
+      </div>}
+      {billDetail.loading && <p role="status">Đang tải đầy đủ món của bàn...</p>}
+      {billDetail.error && <p role="alert" className="text-red-300">{billDetail.error}</p>}
+      {sessionActionPending && (
+        <div role="status" className="rounded-xl border border-amber-500 p-4 space-y-2">
+          <p>Có thao tác bàn chưa xác nhận. Kiểm tra trước khi thực hiện tiếp.</p>
+          <button type="button" disabled={isSubmitting} onClick={() => void runSessionCommand()}
+            className="min-h-12 px-4 rounded-lg bg-amber-500 text-zinc-950 disabled:opacity-50">Kiểm tra thao tác bàn vừa gửi</button>
+        </div>
+      )}
+      {unconfirmedReturn && (
+        <div role="status" className="rounded-xl border border-amber-500 p-4 space-y-2">
+          <p>Có lượt trả bia chưa xác nhận. Kiểm tra lượt này trước khi thao tác tiếp.</p>
+          <button type="button" disabled={isSubmitting} onClick={() => void runBeerReturn()}
+            className="min-h-12 px-4 rounded-lg bg-amber-500 text-zinc-950 disabled:opacity-50">
+            {isSubmitting ? 'Đang kiểm tra...' : 'Kiểm tra lượt trả bia vừa gửi'}
+          </button>
+        </div>
+      )}
+      {returnNotice && <p role="status" className="text-emerald-400">{returnNotice}</p>}
       {errorMessage && (
         <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
@@ -967,6 +551,10 @@ export function StaffDashboard({
         </div>
       )}
 
+      <div className="flex flex-wrap gap-2" aria-label="Phạm vi công việc">
+        <button type="button" aria-pressed={workScope==='MY'} onClick={()=>setWorkScope('MY')} className="min-h-12 px-4 rounded-xl border border-zinc-600">Bàn của tôi</button>
+        <button type="button" aria-pressed={workScope==='ALL'} onClick={()=>setWorkScope('ALL')} className="min-h-12 px-4 rounded-xl border border-zinc-600">Hỗ trợ toàn quán</button>
+      </div>
       {/* KHAY THÔNG BÁO MÓN CHÍN / ĐỒ UỐNG CHỜ BƯNG (STATUS === 'READY') */}
       <section className="bg-zinc-900 border border-amber-500/40 rounded-2xl p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -1045,12 +633,12 @@ export function StaffDashboard({
 
                   <button
                     type="button"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending}
                     onClick={() => handleServeOrderItem(item)}
                     className="min-h-12 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm transition-all"
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    Đã bưng lên bàn
+                    {servingItemId===item.id?'Đang xác nhận món này…':'Đã bưng lên bàn'}
                   </button>
                 </div>
               );
@@ -1060,6 +648,13 @@ export function StaffDashboard({
       </section>
 
       {/* BỘ LỌC KHU VỰC (ZONES) */}
+      <section aria-label="Yêu cầu tính tiền" className="space-y-3 rounded-2xl border border-amber-500/40 p-4">
+        <h2 className="text-lg font-bold">Bàn chờ tính tiền</h2>
+        {sessions.filter(session=>session.status==='REQUEST_BILL'&&(workScope==='ALL'||session.assigned_staff_id===currentStaffId)).map(session=><button key={session.id} type="button" disabled={!session.table_id} onClick={()=>{setActiveTableId(session.table_id);document.getElementById('staff-table-detail')?.scrollIntoView({block:'start'});}} className="min-h-12 px-4 py-3 mr-2 rounded-xl border border-amber-500 text-left">
+          {session.table_id?tableMap.get(session.table_id)?.table_number:'Mang về'} · {formatVND(session.total_amount)} · Xem hóa đơn
+        </button>)}
+        {!sessions.some(session=>session.status==='REQUEST_BILL'&&(workScope==='ALL'||session.assigned_staff_id===currentStaffId))&&<p className="text-zinc-300">Không có bàn đang chờ tính tiền.</p>}
+      </section>
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <button
           type="button"
@@ -1195,7 +790,7 @@ export function StaffDashboard({
                 ) : (
                   <button
                     type="button"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending}
                     onClick={() => handleOpenTable(table)}
                     className="min-h-12 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors"
                   >
@@ -1209,7 +804,7 @@ export function StaffDashboard({
         </div>
 
         {/* Cột phải: Bảng điều khiển chi tiết của Bàn đang chọn */}
-        <div className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5 h-fit">
+        <div id="staff-table-detail" className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5 h-fit">
           {!activeTable || !activeTableSession ? (
             <div className="py-12 text-center text-zinc-500 text-sm">
               Chọn một bàn đang mở ở bên trái để Order hộ khách, Chuyển bàn, Trả bia thừa hoặc Chốt thanh toán.
@@ -1266,6 +861,7 @@ export function StaffDashboard({
                     setSelectedReturnOrderItemId(firstDrink?.id ?? '');
                     setReturnBeerQuantity('1');
                     setIsReturnBeerModalOpen(true);
+                    setReturnUnusedConfirmed(false);
                   }}
                   className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-bold"
                 >
@@ -1305,7 +901,7 @@ export function StaffDashboard({
 
                 <button
                   type="button"
-                  onClick={() => setIsCheckoutModalOpen(true)}
+                  onClick={() => { setPaymentReceived(false); setIsCheckoutModalOpen(true); }}
                   className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-extrabold"
                 >
                   <Receipt className="h-4 w-4" />
@@ -1327,10 +923,10 @@ export function StaffDashboard({
                   ) : (
                     activeTableOrders.map((oi) => {
                       const menu = menuMap.get(oi.menu_item_id);
-                      const canCancel =
+                      const canCancel = oi.quantity > 0 && (
                         oi.status === 'QUEUED' ||
                         (currentStaffRole === 'admin' &&
-                          oi.status !== 'CANCELLED');
+                          oi.status !== 'CANCELLED'));
 
                       return (
                         <div
@@ -1356,7 +952,7 @@ export function StaffDashboard({
                                     : 'bg-amber-500/20 text-amber-300'
                                 )}
                               >
-                                {oi.status}
+                                {oi.quantity === 0 ? 'Đã trả hết' : oi.status}
                               </span>
                             </div>
                             <div className="text-xs text-zinc-400">
@@ -1366,11 +962,12 @@ export function StaffDashboard({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {oi.status === 'READY' && (
+                            {oi.quantity > 0 && oi.status === 'READY' && (
                               <button
                                 type="button"
                                 onClick={() => handleServeOrderItem(oi)}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                                disabled={itemActions.blocked || isSubmitting}
+                                className="min-h-12 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
                               >
                                 Bưng ngay
                               </button>
@@ -1379,8 +976,9 @@ export function StaffDashboard({
                               <button
                                 type="button"
                                 onClick={() => handleCancelQueuedItem(oi)}
-                                title="Hủy món đang chờ (QUEUED)"
-                                className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-300"
+                                title={oi.status === 'QUEUED' ? 'Hủy món đang chờ (QUEUED)' : 'Hủy món (cần lý do)'}
+                                disabled={itemActions.blocked || isSubmitting}
+                                className="min-h-12 min-w-12 p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-300"
                               >
                                 <Ban className="h-4 w-4" />
                               </button>
@@ -1473,6 +1071,15 @@ export function StaffDashboard({
               </button>
             </div>
 
+            {unconfirmedStaffOrder && (
+              <div role="status" className="rounded-lg border border-amber-500 p-3 text-sm">
+                <p>Có lượt gọi hộ chưa xác nhận. Kiểm tra lượt này trước khi thêm món mới.</p>
+                <button type="button" disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending} onClick={()=>handleStaffAddOrderItem()} className="min-h-12 px-3 text-amber-300">
+                  Kiểm tra lượt gọi hộ trước
+                </button>
+              </div>
+            )}
+            {errorMessage && <p role="alert" className="text-sm text-red-300">{errorMessage}</p>}
             <input
               type="text"
               value={orderSearch}
@@ -1514,6 +1121,7 @@ export function StaffDashboard({
                       <input
                         type="text"
                         value={selectedMenuNote[m.id] ?? ''}
+                        disabled={isSubmitting || unconfirmedStaffOrder}
                         onChange={(e) =>
                           setSelectedMenuNote((prev) => ({
                             ...prev,
@@ -1529,8 +1137,9 @@ export function StaffDashboard({
                       <input
                         type="number"
                         min="1"
-                        max="100"
+                        max="99"
                         value={selectedMenuQty[m.id] ?? 1}
+                        disabled={isSubmitting || unconfirmedStaffOrder}
                         onChange={(e) =>
                           setSelectedMenuQty((prev) => ({
                             ...prev,
@@ -1541,7 +1150,7 @@ export function StaffDashboard({
                       />
                       <button
                         type="button"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || unconfirmedStaffOrder}
                         onClick={() => handleStaffAddOrderItem(m)}
                         className="min-h-12 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs"
                       >
@@ -1677,7 +1286,7 @@ export function StaffDashboard({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending}
                   className="min-h-12 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
                 >
                   Xác nhận bàn giao
@@ -1713,6 +1322,8 @@ export function StaffDashboard({
               </p>
             ) : (
               <form onSubmit={handleReturnBeer} className="space-y-4">
+                <fieldset disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending} className="space-y-4">
+                {errorMessage && <p role="alert" className="text-red-300">{errorMessage}</p>}
                 <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1.5">
                     Chọn dòng bia / đồ uống trong bill *
@@ -1750,10 +1361,15 @@ export function StaffDashboard({
                     className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
                   />
                   <p className="text-xs text-zinc-400 mt-1.5">
-                    Hệ thống sẽ tự động trừ số lượng trên hóa đơn, cộng hoàn trả vào kho nguyên liệu (`ingredients`) và ghi nhật ký `RETURN_BEER`.
+                    Chỉ nhận lại bia, đồ uống còn nguyên chưa dùng. Quán sẽ giảm tiền trên bill và hoàn số lượng về kho.
                   </p>
                 </div>
 
+                <label className="min-h-12 flex items-center gap-3 text-sm">
+                  <input type="checkbox" required checked={returnUnusedConfirmed}
+                    onChange={(event) => setReturnUnusedConfirmed(event.target.checked)} />
+                  Tôi đã kiểm tra: hàng còn nguyên, chưa sử dụng.
+                </label>
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
@@ -1764,12 +1380,13 @@ export function StaffDashboard({
                   </button>
                   <button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending}
                     className="min-h-12 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold text-sm"
                   >
                     Hoàn trả bia & Cập nhật bill
                   </button>
                 </div>
+                </fieldset>
               </form>
             )}
           </div>
@@ -1796,6 +1413,11 @@ export function StaffDashboard({
             </div>
 
             <form onSubmit={handleCloseSessionBill} className="space-y-4">
+              {errorMessage && <p role="alert" className="text-red-300">{errorMessage}</p>}
+              <label className="min-h-12 flex items-center gap-3 text-sm">
+                <input type="checkbox" required checked={paymentReceived} onChange={(event) => setPaymentReceived(event.target.checked)} />
+                Tôi đã nhận đủ tiền hoặc đối chiếu giao dịch chuyển khoản thực tế.
+              </label>
               <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
                 <span className="text-sm text-zinc-400">Tổng thanh toán:</span>
                 <span className="text-2xl font-black text-amber-400">
@@ -1845,7 +1467,7 @@ export function StaffDashboard({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || itemActions.blocked || unconfirmedReturn || returnJournalBlocked || sessionActionPending}
                   className="min-h-12 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
                 >
                   Xác nhận đã thu tiền & Đóng bàn

@@ -1,0 +1,111 @@
+{
+  "kind": "reconstructed Git visual baseline",
+  "ref": "9f986ac9413d89a80d7fb1668a1ce07ea1c83e05",
+  "capturedAt": "2026-10-23T00:03:09.792Z",
+  "sources": [
+    {
+      "path": "src/components/customer/DineInOrderView.tsx",
+      "sha256": "aed6f9565ead3577da6967a55042f8039f4f6c759e7f27279b0a6ed95c2d163b"
+    },
+    {
+      "path": "src/components/customer/TakeawayOrderView.tsx",
+      "sha256": "4b92ae0e8b6469af4b696d3882cb3a4d43d49a2f612a95b04ead38eccdbef3e3"
+    },
+    {
+      "path": "src/components/kitchen/KitchenKdsBoard.tsx",
+      "sha256": "1f5a4445fbf3114f979cea97a726a7cf8941560b12b7f3e6a17247b38786762c"
+    },
+    {
+      "path": "src/components/staff/StaffDashboard.tsx",
+      "sha256": "a63c862f659d1eabe5ed303e459266b280bff03fb81c0686c65e09f5c5c2543e"
+    },
+    {
+      "path": "src/lib/store/useCartStore.ts",
+      "sha256": "9d38ebec4eeec70a67be5501902bb83fc6c18211997c91b7130cd4177c85f322"
+    },
+    {
+      "path": "src/lib/utils.ts",
+      "sha256": "dc516257e8a1b483ebd87832ef662fe47cdb4ff810aafc96e424c8b0a88ffe25"
+    },
+    {
+      "path": "src/app/globals.css",
+      "sha256": "54a85eb67c00724339f2b595e126af1f1869e7c0e42f6ee23c60feae8915bbc3"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "7740e5534bdc71188e97aa05da11034c3a84e9427ba669d89d87c0f53ebafaac"
+    }
+  ],
+  "toolchainLockSha256": "13fc95adb76289ca5bb2eb3e906f25171d285777a99c8decca4d8876097a8701",
+  "screenshots": [
+    {
+      "file": "before_dine_menu_390.png",
+      "sha256": "3576d6c932ede1eaba1b786a847fa1c6cf65cc35a1c4f5d58c73a6896ad0423f",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_dine_cart_390.png",
+      "sha256": "70f7b086a66d88356885e0c76afe640be1a06af52c71efce1298711c8aa0aac9",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_dine_progress_390.png",
+      "sha256": "61c641e30caa075cb0f38afac88b1361fd12278621360a217786bd19a3e6c7b1",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_dine_bill_390.png",
+      "sha256": "98137cdc9388bfebd269732f9c89539c33be338f1b34c05d35df7b434ebd8197",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_takeaway_menu_390.png",
+      "sha256": "d036cc74f5a86b39ae9a641a8dbda880ed61cc050e0224eb21ef230117a18797",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_takeaway_payment_390.png",
+      "sha256": "0f7cc4e489ce1a9e1f025e2ebf9a297ef927a3123abb179ffa57be4e92827b2d",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "file": "before_kitchen_1194.png",
+      "sha256": "f480890f69e928aab067e95114d3daa5c8abf27e1a34a8b862a2807d420a5270",
+      "viewport": {
+        "width": 1194,
+        "height": 834
+      }
+    },
+    {
+      "file": "before_staff_1194.png",
+      "sha256": "d79e9535fde78b532f7be6ff28d50c79dfc7d25dd6ddbd293e48c1a86099049c",
+      "viewport": {
+        "width": 1194,
+        "height": 834
+      }
+    }
+  ],
+  "limitations": [
+    "Display fixtures only; no historical deployment or real banking/auth/database evidence.",
+    "Original components/store/utils/CSS unchanged; current installed dependencies render the pinned sources.",
+    "Legacy data peer denies mutations; non-loopback traffic blocked, QR is a non-payment fixture."
+  ]
+}

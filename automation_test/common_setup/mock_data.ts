@@ -128,6 +128,7 @@ export const MOCK_ACTIVE_SESSION: TableSessionRow = {
   payment_method: 'VIETQR',
   payment_code: 'DZO2026ACTIVE',
   total_amount: 518000,
+  activated_at: null,
   opened_at: '2026-10-21T11:00:00.000Z',
   closed_at: null,
 };
@@ -139,6 +140,7 @@ export const MOCK_ORDER_ITEMS: OrderItemRow[] = [
     menu_item_id: 'menu-oc-huong-bo-toi',
     quantity: 2,
     unit_price: 139000,
+    stock_export_log_id: null,
     unit_cost_price: 75000,
     note: 'Cay nhiều, thêm bánh mì',
     station: 'KITCHEN',
@@ -159,6 +161,7 @@ export const MOCK_ORDER_ITEMS: OrderItemRow[] = [
     menu_item_id: 'menu-bia-tiger',
     quantity: 10,
     unit_price: 24000,
+    stock_export_log_id: null,
     unit_cost_price: 15500,
     note: 'Lấy xô đá lớn',
     station: 'BAR_INSTANT',

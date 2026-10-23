@@ -1,83 +1,51 @@
-import { auth, currentUser } from '@clerk/nextjs/server';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import 'server-only';
+
+import { auth } from '@clerk/nextjs/server';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
-import type { Database, StaffRole } from '@/types/database.types';
+import type { StaffRole } from '@/types/database.types';
 
-/**
- * Tự động đồng bộ (Auto-Upsert) tài khoản đang đăng nhập từ Clerk sang bảng `staff_profiles` của Supabase.
- * Giúp các cột khóa ngoại (assigned_staff_id, served_by_staff_id, created_by) luôn hợp lệ 100%
- * và đảm bảo phân quyền theo đúng role trong bảng `staff_profiles`.
- */
-export async function syncClerkStaffToSupabase(
-  _supabase?: SupabaseClient<Database>
-): Promise<{
-  userId: string | null;
+export interface StaffIdentity {
+  userId: string;
   role: StaffRole;
-  isActive: boolean;
-}> {
+  isActive: true;
+}
+
+export type StaffAccessResult =
+  | { status: 'authorized'; staff: StaffIdentity }
+  | { status: 'unauthenticated' | 'forbidden' | 'unavailable' };
+
+function isStaffRole(value: unknown): value is StaffRole {
+  return value === 'admin' || value === 'staff' || value === 'kitchen';
+}
+
+/** Read existing access only. Never provision from login or cache across requests. */
+export async function getCurrentStaffAccess(): Promise<StaffAccessResult> {
   try {
-    const { userId, sessionClaims } = await auth();
-    if (!userId) {
-      return { userId: null, role: 'admin', isActive: true };
-    }
+    const { userId } = await auth();
+    if (!userId) return { status: 'unauthenticated' };
 
-    // Sử dụng Service Role Client để đảm bảo luôn đọc/ghi được staff_profiles bất kể cấu hình RLS
-    const adminSupabase = createSupabaseServiceRoleClient();
-
-    const rawMetadata = (
-      sessionClaims as Record<string, unknown> | null | undefined
-    )?.metadata as { role?: StaffRole } | undefined;
-    const rawPublicMetadata = (
-      sessionClaims as Record<string, unknown> | null | undefined
-    )?.publicMetadata as { role?: StaffRole } | undefined;
-
-    const candidateRole = rawMetadata?.role ?? rawPublicMetadata?.role;
-    const clerkRole: StaffRole =
-      candidateRole === 'admin' ||
-      candidateRole === 'kitchen' ||
-      candidateRole === 'staff'
-        ? candidateRole
-        : 'admin';
-
-    // 1. Kiểm tra xem userId của Clerk đã tồn tại trong bảng staff_profiles chưa
-    const { data: existingProfile } = await adminSupabase
+    const supabase = createSupabaseServiceRoleClient();
+    const { data: profile, error } = await supabase
       .from('staff_profiles')
       .select('id, role, is_active')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (existingProfile) {
-      // Ưu tiên role trong bảng staff_profiles để Chủ quán có thể đổi quyền nhân sự trực tiếp tại /admin/staff
-      return {
-        userId,
-        role: existingProfile.role,
-        isActive: existingProfile.is_active,
-      };
+    if (error) return { status: 'unavailable' };
+    if (
+      !profile ||
+      profile.id !== userId ||
+      profile.is_active !== true ||
+      !isStaffRole(profile.role)
+    ) {
+      return { status: 'forbidden' };
     }
-
-    // 2. Nếu chưa có trong Supabase, lấy tên hiển thị từ Clerk và tự động tạo mới trong staff_profiles
-    const clerkUser = await currentUser().catch(() => null);
-    const fullName =
-      [clerkUser?.firstName, clerkUser?.lastName]
-        .filter(Boolean)
-        .join(' ')
-        .trim() ||
-      clerkUser?.username ||
-      clerkUser?.emailAddresses?.[0]?.emailAddress ||
-      `Nhân sự (${userId.slice(-5)})`;
-
-    await adminSupabase.from('staff_profiles').upsert(
-      {
-        id: userId,
-        full_name: fullName,
-        role: clerkRole,
-        is_active: true,
-      },
-      { onConflict: 'id' }
-    );
-
-    return { userId, role: clerkRole, isActive: true };
+    return {
+      status: 'authorized',
+      staff: { userId, role: profile.role, isActive: true },
+    };
   } catch {
-    return { userId: null, role: 'admin', isActive: true };
+    // Clerk, database and configuration failures never grant privileges.
+    return { status: 'unavailable' };
   }
 }

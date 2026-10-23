@@ -6,6 +6,9 @@ export class CustomerTakeawayPage extends BasePage {
   async open(): Promise<void> {
     await this.goto(TEST_ENV.routes.customerTakeaway);
   }
+  getUnavailableNotice(): Locator {
+    return this.page.getByText('Quán chưa mở đặt món và thanh toán trực tuyến.', { exact: false });
+  }
 
   getOrderTabButton(): Locator {
     return this.page.getByRole('button', { name: /Đặt món mới/i });

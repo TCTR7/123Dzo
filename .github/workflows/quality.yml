@@ -1,0 +1,57 @@
+name: Quality gates
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      POSTGRES_BIN: /usr/lib/postgresql/16/bin
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-isolated.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-only-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-build-only-service-key
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsudGVzdC5pbnZhbGlkJA
+      NEXT_PUBLIC_PRIVATE_REALTIME_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck:tests
+      - run: npm run typecheck:e2e
+      - run: node scripts/check-migrations.mjs
+      - run: npm run test:integration:preflight
+      - run: npm run test:coverage
+      - name: Disposable PostgreSQL suites (no application credentials)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          npm run test:integration
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:ux
+      - run: npm run test:ux
+        env:
+          UX_BROWSER: webkit
+      - run: npm run test:ux:manual
+      - run: npm run test:integration:pwa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-quality-evidence
+          path: |
+            unit_test/coverage
+            automation_test/artifacts/ux
+  # Real Clerk/Supabase E2E runs separately against an explicitly configured
+  # isolated deployment. Local fixtures must never be reported as that evidence.

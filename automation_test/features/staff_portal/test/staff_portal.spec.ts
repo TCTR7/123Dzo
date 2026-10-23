@@ -27,7 +27,7 @@ test.describe('Module: Waitstaff Portal (/staff)', () => {
         },
       },
     });
-    // Khi chưa đăng nhập Clerk, endpoint bảo mật trả về 401 hoặc 500 (nếu thiếu env)
-    expect([200, 401, 500]).toContain(res.status());
+    // Anonymous must be denied; a server configuration failure is never a pass.
+    expect(res.status()).toBe(401);
   });
 });

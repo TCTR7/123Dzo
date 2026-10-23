@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", "unit_test/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "automation_test"]
+}

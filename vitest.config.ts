@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
+  esbuild: { jsx: 'automatic' },
   test: {
     globals: true,
     environment: 'jsdom',
@@ -11,7 +12,8 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './unit_test/coverage',
-      include: ['src/lib/**/*.ts'],
+      include: ['src/**/*.{ts,tsx}'],
+      thresholds: { lines: 80 },
     },
   },
   resolve: {

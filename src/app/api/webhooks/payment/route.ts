@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { onlinePaymentsEnabled } from '@/lib/config/payments';
 import { NextResponse } from 'next/server';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
 
@@ -113,12 +114,12 @@ function verifyWebhookAuthenticity(
     return false;
   }
 
-  // Nếu cả 2 biến môi trường đều chưa cấu hình: chỉ cho phép mô phỏng ở môi trường dev
+  // Không chấp nhận webhook unsigned, kể cả môi trường dev.
   if (payosChecksumKey) {
     return false;
   }
 
-  return process.env.NODE_ENV !== 'production';
+  return false;
 }
 
 /**
@@ -163,6 +164,7 @@ function extractPaidAmount(payload: PaymentWebhookPayload): number {
  * Nhận Webhook từ PayOS / SePay khi khách chuyển khoản thành công (Mục 3.1 - Luồng 2 & Mục 9.2 PRD_SPEC.md)
  */
 export async function POST(req: Request) {
+  if (!onlinePaymentsEnabled()) return NextResponse.json({ error: { code: 'PAYMENT_NOT_CONFIGURED' } }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   try {
     const rawBody = await req.text();
     const payload = JSON.parse(rawBody) as PaymentWebhookPayload;

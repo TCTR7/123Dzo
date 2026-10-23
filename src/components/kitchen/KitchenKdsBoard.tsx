@@ -1,7 +1,16 @@
 'use client';
+import { useScreenWakeLock } from '@/lib/pwa/use-wake-lock';
+import { effectiveQueueTime } from '@/lib/customer/queue-time';
+import { SoundControls } from '@/components/ui/SoundControls';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import type { DisplayOrderItem as OrderItemRow } from '@/lib/orders/contracts';
+import type { PublicMenuItem as MenuItemRow, KitchenSession as TableSessionRow } from '@/lib/data/read-contracts';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { useMenuActions } from '@/lib/menu/use-menu-actions';
+import { MenuActionFeedback } from '@/components/admin/MenuActionFeedback';
+import { useItemActions } from '@/lib/item-actions/use-item-actions';
+import { ItemActionFeedback } from '@/components/staff/ItemActionFeedback';
 import { UserButton } from '@clerk/nextjs';
 import {
   ChefHat,
@@ -11,25 +20,21 @@ import {
   CheckCircle2,
   Ban,
   Sun,
-  Volume2,
   Search,
   AlertTriangle,
   X,
   BarChart3,
   LayoutGrid,
 } from 'lucide-react';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useServerRefresh } from '@/lib/data/use-server-refresh';
+import { useSnapshotSound } from '@/lib/data/use-snapshot-sound';
 import {
-  playNotificationSound,
   formatDurationFromSeconds,
   cn,
 } from '@/lib/utils';
 import type {
-  MenuItemRow,
-  OrderItemRow,
   StaffRole,
   TableRow,
-  TableSessionRow,
 } from '@/types/database.types';
 
 interface KitchenKdsBoardProps {
@@ -38,13 +43,14 @@ interface KitchenKdsBoardProps {
   tables: TableRow[];
   initialMenuItems: MenuItemRow[];
   currentStaffRole?: StaffRole;
+  currentStaffId: string;
 }
 
 interface BatchGroup {
   menuItemId: string;
   menuItem: MenuItemRow | undefined;
   totalQuantity: number;
-  oldestCreatedAt: string;
+  oldestCreatedAt: string | null;
   items: OrderItemRow[];
 }
 
@@ -58,78 +64,33 @@ interface CookingGroup {
   items: OrderItemRow[];
 }
 
-interface WakeLockSentinelLike {
-  released: boolean;
-  release: () => Promise<void>;
-}
-
 export function KitchenKdsBoard({
   initialKitchenOrders,
   initialActiveSessions,
   tables,
   initialMenuItems,
   currentStaffRole = 'kitchen',
+  currentStaffId,
 }: KitchenKdsBoardProps) {
-  const supabase = createSupabaseBrowserClient();
+  const itemActions = useItemActions(currentStaffId);
+  const menuActions = useMenuActions(currentStaffId);
 
   const [orders, setOrders] = useState<OrderItemRow[]>(initialKitchenOrders);
   const [sessions, setSessions] = useState<TableSessionRow[]>(
     initialActiveSessions
   );
   const [menuItems, setMenuItems] = useState<MenuItemRow[]>(initialMenuItems);
+  useEffect(() => { setOrders(initialKitchenOrders); }, [initialKitchenOrders]);
+  useEffect(() => { setSessions(initialActiveSessions); }, [initialActiveSessions]);
+  useEffect(() => { setMenuItems(initialMenuItems); }, [initialMenuItems]);
 
   const [is86DrawerOpen, setIs86DrawerOpen] = useState<boolean>(false);
+  const [queueMode,setQueueMode]=useState<'BATCH'|'FIFO'>('BATCH');
   const [drawerSearch, setDrawerSearch] = useState<string>('');
-  const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const isWakeLockActive = useScreenWakeLock();
+  const isSubmitting = itemActions.busy || menuActions.busy;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
-
-  const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
-
-  // ==========================================================================
-  // 1. TÍCH HỢP SCREEN WAKE LOCK API CHỐNG TẮT MÀN HÌNH TABLET BẾP (MỤC 10.2)
-  // ==========================================================================
-  useEffect(() => {
-    let isMounted = true;
-
-    async function requestScreenWakeLock() {
-      if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) {
-        return;
-      }
-      try {
-        const sentinel = (await navigator.wakeLock.request(
-          'screen'
-        )) as unknown as WakeLockSentinelLike;
-        if (isMounted) {
-          wakeLockRef.current = sentinel;
-          setIsWakeLockActive(true);
-        }
-      } catch {
-        if (isMounted) {
-          setIsWakeLockActive(false);
-        }
-      }
-    }
-
-    void requestScreenWakeLock();
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        void requestScreenWakeLock();
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      isMounted = false;
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLockRef.current && !wakeLockRef.current.released) {
-        void wakeLockRef.current.release().catch(() => undefined);
-      }
-    };
-  }, []);
 
   // Bộ đếm thời gian thực mỗi giây cho đồng hồ chờ & đồng hồ nấu trên KDS
   useEffect(() => {
@@ -157,124 +118,13 @@ export function KitchenKdsBoard({
     return map;
   }, [menuItems]);
 
-  // ==========================================================================
-  // 2. LẮNG NGHE SUPABASE REALTIME & DỌN DẸP KÊNH (MỤC 2.2 AGENTS.MD)
-  // ==========================================================================
-  useEffect(() => {
-    const channel = supabase
-      .channel('kitchen-kds-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newItem = payload.new as OrderItemRow;
-            if (newItem.station !== 'KITCHEN') return;
+  useServerRefresh(15000, currentStaffId);
+  useSnapshotSound(initialKitchenOrders.filter(item => item.quantity > 0 && item.station === 'KITCHEN' && item.status === 'QUEUED' &&
+    initialActiveSessions.some(session => session.id === item.session_id && (session.status === 'ACTIVE' || session.status === 'REQUEST_BILL'))).map(item => item.id));
 
-            setOrders((prev) => {
-              if (prev.some((i) => i.id === newItem.id)) return prev;
-              return [...prev, newItem];
-            });
-
-            // Chỉ phát chuông khi phiên bàn đã ACTIVE (chặn chuông từ đơn mang về đang PENDING_PAYMENT)
-            const sess = sessionMap.get(newItem.session_id);
-            if (
-              newItem.status === 'QUEUED' &&
-              sess &&
-              (sess.status === 'ACTIVE' || sess.status === 'REQUEST_BILL')
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as OrderItemRow;
-            if (updatedItem.station !== 'KITCHEN') return;
-
-            setOrders((prev) => {
-              const exists = prev.some((i) => i.id === updatedItem.id);
-              if (
-                updatedItem.status === 'QUEUED' ||
-                updatedItem.status === 'COOKING'
-              ) {
-                return exists
-                  ? prev.map((i) =>
-                      i.id === updatedItem.id ? updatedItem : i
-                    )
-                  : [...prev, updatedItem];
-              }
-              return prev.filter((i) => i.id !== updatedItem.id);
-            });
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id?: string }).id;
-            if (deletedId) {
-              setOrders((prev) => prev.filter((i) => i.id !== deletedId));
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'table_sessions',
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newSession = payload.new as TableSessionRow;
-            setSessions((prev) => {
-              if (prev.some((s) => s.id === newSession.id)) return prev;
-              return [...prev, newSession];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedSession = payload.new as TableSessionRow;
-            const oldSession = payload.old as Partial<TableSessionRow>;
-            setSessions((prev) => {
-              const exists = prev.some((s) => s.id === updatedSession.id);
-              return exists
-                ? prev.map((s) =>
-                    s.id === updatedSession.id ? updatedSession : s
-                  )
-                : [...prev, updatedSession];
-            });
-            // Khi đơn Mang về vừa được Webhook kích hoạt từ PENDING_PAYMENT -> ACTIVE, phát chuông báo Bếp
-            if (
-              updatedSession.status === 'ACTIVE' &&
-              oldSession.status === 'PENDING_PAYMENT'
-            ) {
-              void playNotificationSound('/sounds/ting-ting.mp3');
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'menu_items',
-        },
-        (payload) => {
-          const updatedMenu = payload.new as MenuItemRow;
-          setMenuItems((prev) =>
-            prev.map((m) => (m.id === updatedMenu.id ? updatedMenu : m))
-          );
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase]);
-
-  // Chỉ hiển thị đơn của các phiên đã kích hoạt (ACTIVE / REQUEST_BILL)
-  // Tuyệt đối chặn đơn Mang về đang PENDING_PAYMENT hoặc bàn đã CLOSED (Mục 3.2 AGENTS.md)
   const validKitchenOrders = useMemo(() => {
     return orders.filter((item) => {
+      if (item.quantity <= 0) return false;
       if (item.station !== 'KITCHEN') return false;
       const sess = sessionMap.get(item.session_id);
       if (!sess) return false;
@@ -291,9 +141,9 @@ export function KitchenKdsBoard({
       .filter((item) => item.status === 'QUEUED')
       .sort(
         (a, b) =>
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          (effectiveQueueTime(a,sessionMap.get(a.session_id))??Infinity)-(effectiveQueueTime(b,sessionMap.get(b.session_id))??Infinity)
       );
-  }, [validKitchenOrders]);
+  }, [validKitchenOrders,sessionMap]);
 
   // Cột trái: Gom nhóm các món QUEUED trùng menu_item_id (Batch Cooking View)
   const batchGroups = useMemo<BatchGroup[]>(() => {
@@ -307,8 +157,8 @@ export function KitchenKdsBoard({
     const groups: BatchGroup[] = [];
     map.forEach((items, menuItemId) => {
       const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
-      const oldestCreatedAt =
-        items[0]?.created_at ?? new Date().toISOString();
+      const effective=items[0]?effectiveQueueTime(items[0],sessionMap.get(items[0].session_id)):null;
+      const oldestCreatedAt=effective===null?null:new Date(effective).toISOString();
       groups.push({
         menuItemId,
         menuItem: menuMap.get(menuItemId),
@@ -324,11 +174,11 @@ export function KitchenKdsBoard({
         return b.items.length - a.items.length;
       }
       return (
-        new Date(a.oldestCreatedAt).getTime() -
-        new Date(b.oldestCreatedAt).getTime()
+        (a.oldestCreatedAt?Date.parse(a.oldestCreatedAt):Infinity) -
+        (b.oldestCreatedAt?Date.parse(b.oldestCreatedAt):Infinity)
       );
     });
-  }, [fifoQueuedOrders, menuMap]);
+  }, [fifoQueuedOrders, menuMap, sessionMap]);
 
   // Các mẻ / món đang nấu (status === 'COOKING')
   const cookingGroups = useMemo<CookingGroup[]>(() => {
@@ -382,145 +232,25 @@ export function KitchenKdsBoard({
   // 3. BẤM "NẤU GỘP CẢ MẺ" (BATCH COOKING) HOẶC "NHẬN NẤU ĐƠN LẺ"
   // Bắt buộc ghi nhận cooking_started_at và batch_id (nếu nấu gộp) (Mục 3.3 AGENTS.md)
   // ==========================================================================
-  async function handleStartCooking(
-    targetItems: OrderItemRow[],
-    isBatch: boolean
-  ) {
-    if (isSubmitting || targetItems.length === 0) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    const nowIso = new Date().toISOString();
-    const sharedBatchId =
-      isBatch && targetItems.length > 1 ? crypto.randomUUID() : null;
-    const itemIds = targetItems.map((i) => i.id);
-
-    try {
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'COOKING',
-          cooking_started_at: nowIso,
-          batch_id: sharedBatchId,
-        })
-        .in('id', itemIds)
-        .select('*');
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể chuyển trạng thái sang COOKING'
-        );
-      }
-
-      const updatedMap = new Map<string, OrderItemRow>();
-      data.forEach((d) => updatedMap.set(d.id, d));
-
-      setOrders((prev) =>
-        prev.map((item) => updatedMap.get(item.id) ?? item)
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi bắt đầu nấu món'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+  async function handleStartCooking(targetItems: OrderItemRow[], _isBatch: boolean) {
+    if (isSubmitting || itemActions.blocked || menuActions.blocked || !targetItems.length) return;
+    await itemActions.run({action:'START',reason:'',items:targetItems.map((item)=>({id:item.id,sessionId:item.session_id,expectedStatus:'QUEUED',expectedQuantity:item.quantity}))});
   }
 
   // ==========================================================================
   // 4. BẤM "HOÀN THÀNH" (CHUYỂN SANG READY, GHI READY_AT & BẮN WEB PUSH CHO NV)
   // ==========================================================================
   async function handleCompleteCooking(targetItems: OrderItemRow[]) {
-    if (isSubmitting || targetItems.length === 0) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    const nowIso = new Date().toISOString();
-    const itemIds = targetItems.map((i) => i.id);
-
-    try {
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'READY',
-          ready_at: nowIso,
-        })
-        .in('id', itemIds)
-        .select('*');
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể hoàn thành món sang trạng thái READY'
-        );
-      }
-
-      const completedIds = new Set(data.map((d) => d.id));
-      setOrders((prev) => prev.filter((item) => !completedIds.has(item.id)));
-
-      // Nhóm theo từng session_id để bắn thông báo đẩy Web Push cho đúng nhân viên phụ trách từng bàn
-      const itemsBySession = new Map<string, OrderItemRow[]>();
-      data.forEach((item) => {
-        const list = itemsBySession.get(item.session_id) ?? [];
-        list.push(item);
-        itemsBySession.set(item.session_id, list);
-      });
-
-      itemsBySession.forEach((sessionItems, sessionId) => {
-        const tableLabel = getSessionTableLabel(sessionId);
-        const summary = sessionItems
-          .map(
-            (i) =>
-              `${i.quantity}x ${menuMap.get(i.menu_item_id)?.name ?? 'Món ăn'}`
-          )
-          .join(', ');
-
-        void fetch('/api/push/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            orderItemIds: sessionItems.map((i) => i.id),
-            title: `🍲 MÓN CHÍN • ${tableLabel}`,
-            body: `${summary} đã nấu xong! Mời nhân viên vào Bếp bưng ra bàn.`,
-          }),
-        }).catch(() => undefined);
-      });
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi hoàn thành món'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (isSubmitting || itemActions.blocked || menuActions.blocked || !targetItems.length) return;
+    await itemActions.run({action:'READY',reason:'',items:targetItems.map((item)=>({id:item.id,sessionId:item.session_id,expectedStatus:'COOKING',expectedQuantity:item.quantity}))});
   }
 
   // ==========================================================================
   // 5. BÁO HẾT MÓN NHANH (86ING) NGAY TRÊN MÀN HÌNH BẾP (US-K03)
   // ==========================================================================
   async function handleToggle86MenuItem(menuItem: MenuItemRow) {
-    setErrorMessage(null);
-    try {
-      const { data, error } = await supabase
-        .from('menu_items')
-        .update({ is_available: !menuItem.is_available })
-        .eq('id', menuItem.id)
-        .select('*')
-        .single();
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng (86ing)'
-        );
-      }
-
-      setMenuItems((prev) =>
-        prev.map((m) => (m.id === data.id ? data : m))
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi báo hết món'
-      );
-    }
+    if (itemActions.blocked || menuActions.blocked) return;
+    await menuActions.run({ action: 'AVAILABILITY', id: menuItem.id, item: { is_available: !menuItem.is_available }, expected: { is_available: menuItem.is_available } });
   }
 
   const outOfStockCount = useMemo(
@@ -529,7 +259,7 @@ export function KitchenKdsBoard({
   );
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 lg:p-6 flex flex-col gap-5">
+    <div className="operations-app min-h-screen bg-zinc-950 text-zinc-100 p-4 lg:p-6 flex flex-col gap-5" aria-busy={isSubmitting}>
       {/* Top Header KDS Tablet */}
       <header className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -555,7 +285,7 @@ export function KitchenKdsBoard({
                 <Sun className="h-3.5 w-3.5" />
                 {isWakeLockActive
                   ? 'Wake Lock: Giữ sáng màn hình'
-                  : 'Wake Lock: Chờ kích hoạt'}
+                  : 'Màn hình có thể tự tắt'}
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
@@ -566,14 +296,7 @@ export function KitchenKdsBoard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
-            className="min-h-12 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
-          >
-            <Volume2 className="h-4 w-4 text-amber-400" />
-            Thử chuông Bếp
-          </button>
+          <SoundControls />
 
           <button
             type="button"
@@ -614,6 +337,8 @@ export function KitchenKdsBoard({
         </div>
       </header>
 
+      <ItemActionFeedback pending={itemActions.pending} busy={itemActions.busy} error={itemActions.error} recover={() => itemActions.run()} />
+      <MenuActionFeedback {...menuActions} recover={() => menuActions.run()} />
       {errorMessage && (
         <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
@@ -630,15 +355,19 @@ export function KitchenKdsBoard({
       {/* ==================================================================== */}
       {/* BỐ CỤC 2 CỘT LỚN CHO MÀN HÌNH NGANG TABLET (MỤC 13.3 PRD_SPEC.MD) */}
       {/* ==================================================================== */}
+      <div className="flex flex-wrap gap-2" aria-label="Cách xem hàng chờ">
+        <button type="button" aria-pressed={queueMode==='BATCH'} onClick={()=>setQueueMode('BATCH')} className="min-h-12 px-4 border rounded-xl">Gom món trùng</button>
+        <button type="button" aria-pressed={queueMode==='FIFO'} onClick={()=>setQueueMode('FIFO')} className="min-h-12 px-4 border rounded-xl">Theo thứ tự gọi</button>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
         {/* CỘT TRÁI (5/12): GOM MÓN TRÙNG - BATCH COOKING VIEW (US-K01) */}
-        <section className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-4">
+        <section className={queueMode==='BATCH'?'lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-4':'hidden'}>
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <div className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-amber-400" />
               <div>
                 <h2 className="text-base font-extrabold text-zinc-100">
-                  Cột 1: Gom Món Trùng (Batch Cooking)
+                  Gom món trùng
                 </h2>
                 <p className="text-xs text-zinc-400">
                   Gom các đĩa giống nhau của nhiều bàn để xào/nấu chung 1 lần chảo
@@ -661,7 +390,7 @@ export function KitchenKdsBoard({
                 const waitSeconds = Math.max(
                   0,
                   Math.floor(
-                    (nowMs - new Date(group.oldestCreatedAt).getTime()) / 1000
+                    (nowMs - (group.oldestCreatedAt?Date.parse(group.oldestCreatedAt):nowMs)) / 1000
                   )
                 );
 
@@ -692,7 +421,7 @@ export function KitchenKdsBoard({
 
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-300 shrink-0">
                         <Clock className="h-3.5 w-3.5 text-amber-400" />
-                        Chờ {formatDurationFromSeconds(waitSeconds)}
+                        {group.oldestCreatedAt?`Chờ ${formatDurationFromSeconds(waitSeconds)}`:'Chưa có mốc nhận đơn xác minh'}
                       </span>
                     </div>
 
@@ -721,7 +450,7 @@ export function KitchenKdsBoard({
 
                     <button
                       type="button"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || itemActions.blocked || menuActions.blocked}
                       onClick={() =>
                         handleStartCooking(group.items, isMultiTableBatch)
                       }
@@ -745,7 +474,7 @@ export function KitchenKdsBoard({
         </section>
 
         {/* CỘT PHẢI (7/12): CÁC MẺ ĐANG NẤU (COOKING) & HÀNG ĐỢI THỨ TỰ THỜI GIAN (FIFO) */}
-        <section className="lg:col-span-7 flex flex-col gap-5">
+        <section className={queueMode==='BATCH'?'lg:col-span-7 flex flex-col gap-5':'lg:col-span-12 flex flex-col gap-5'}>
           {/* KHU VỰC 2A: CÁC MÓN / MẺ ĐANG ĐỨNG BẾP (STATUS === 'COOKING') */}
           <div className="bg-zinc-900 border border-orange-500/40 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
@@ -836,7 +565,7 @@ export function KitchenKdsBoard({
 
                       <button
                         type="button"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || itemActions.blocked || menuActions.blocked}
                         onClick={() => handleCompleteCooking(cg.items)}
                         className="min-h-12 w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
                       >
@@ -857,7 +586,7 @@ export function KitchenKdsBoard({
                 <Clock className="h-5 w-5 text-amber-400" />
                 <div>
                   <h2 className="text-base font-extrabold text-zinc-100">
-                    Cột 2: Hàng Đợi Thứ Tự Gọi Món (FIFO Queue)
+                    Món chờ theo thứ tự gọi
                   </h2>
                   <p className="text-xs text-zinc-400">
                     Bàn nào đặt trước xếp trên (Khớp 100% với số thứ tự chờ trên máy khách)
@@ -880,7 +609,7 @@ export function KitchenKdsBoard({
                   const waitSeconds = Math.max(
                     0,
                     Math.floor(
-                      (nowMs - new Date(item.created_at).getTime()) / 1000
+                      (nowMs - (effectiveQueueTime(item,sessionMap.get(item.session_id))??nowMs)) / 1000
                     )
                   );
                   const isWaitingLong = waitSeconds > 10 * 60;
@@ -911,7 +640,7 @@ export function KitchenKdsBoard({
                           </div>
                           <div className="flex items-center gap-3 text-xs text-zinc-400 mt-1">
                             <span>
-                              Đã chờ: {formatDurationFromSeconds(waitSeconds)}
+                              {effectiveQueueTime(item,sessionMap.get(item.session_id))===null?'Chưa có mốc nhận đơn xác minh':`Đã chờ: ${formatDurationFromSeconds(waitSeconds)}`}
                             </span>
                             {item.note && (
                               <span className="text-orange-300 font-medium">
@@ -924,7 +653,7 @@ export function KitchenKdsBoard({
 
                       <button
                         type="button"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || itemActions.blocked || menuActions.blocked}
                         onClick={() => handleStartCooking([item], false)}
                         className="min-h-12 px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-zinc-950 font-extrabold text-xs shrink-0"
                       >
@@ -961,6 +690,7 @@ export function KitchenKdsBoard({
               </button>
             </div>
 
+            <MenuActionFeedback {...menuActions} recover={() => menuActions.run()} />
             <div className="relative">
               <Search className="h-4 w-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -994,6 +724,7 @@ export function KitchenKdsBoard({
                     <button
                       type="button"
                       onClick={() => handleToggle86MenuItem(m)}
+                      disabled={isSubmitting || itemActions.blocked || menuActions.blocked}
                       className={cn(
                         'min-h-12 px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors',
                         m.is_available

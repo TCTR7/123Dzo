@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { enableSound } from '@/lib/audio/notifications';
 
 vi.mock('browser-image-compression', () => ({
   default: vi.fn(async (file: File) => {
@@ -42,6 +43,7 @@ describe('Unit Test: src/lib/utils.ts (100% Coverage)', () => {
 
   describe('compressMenuImageToWebP() - Nén ảnh thực đơn WebP < 80KB (Mục 10.1)', () => {
     it('chuyển đổi file ảnh sang định dạng .webp và đảm bảo dung lượng < 80KB', async () => {
+      vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 1024, height: 768, close: vi.fn() })));
       const originalFile = new File(
         [new Uint8Array(500 * 1024)],
         'oc-huong-xao-bo-toi.jpg',
@@ -55,22 +57,25 @@ describe('Unit Test: src/lib/utils.ts (100% Coverage)', () => {
     });
   });
 
-  describe('playNotificationSound() - Phát âm thanh cảnh báo (/sounds/ting-ting.mp3)', () => {
+  describe('playNotificationSound() - Phát âm thanh cảnh báo (/sounds/ting-ting.wav)', () => {
     it('gọi Audio.play() an toàn và không crash nếu trình duyệt chặn Autoplay', async () => {
       const playMock = vi.fn().mockResolvedValue(undefined);
       vi.stubGlobal(
         'Audio',
-        vi.fn().mockImplementation(() => ({
+        vi.fn().mockImplementation(function AudioMock() { return {
           preload: 'auto',
           volume: 1,
           play: playMock,
-        }))
+        }; })
       );
 
       await expect(
-        playNotificationSound('/sounds/ting-ting.mp3')
+        playNotificationSound()
       ).resolves.toBeUndefined();
-      expect(playMock).toHaveBeenCalledTimes(1);
+      expect(playMock).not.toHaveBeenCalled();
+      await enableSound();
+      await playNotificationSound();
+      expect(playMock).toHaveBeenCalledTimes(2);
     });
   });
 
