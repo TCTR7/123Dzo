@@ -1,4 +1,5 @@
 'use client';
+import { orderStatusLabel, staffRoleLabel } from '@/lib/ui-labels';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -41,11 +42,9 @@ import type {
   StaffRole,
   TableRow,
   TableSessionRow,
-  ZoneRow,
 } from '@/types/database.types';
 
 interface StaffDashboardProps {
-  initialZones: ZoneRow[];
   initialTables: TableRow[];
   initialSessions: TableSessionRow[];
   initialOrderItems: OrderItemRow[];
@@ -73,7 +72,6 @@ function generatePaymentCode(): string {
 }
 
 export function StaffDashboard({
-  initialZones,
   initialTables,
   initialSessions,
   initialOrderItems,
@@ -86,7 +84,6 @@ export function StaffDashboard({
   const supabase = createSupabaseBrowserClient();
   const [menuItems, setMenuItems] = useState(initialMenuItems);
 
-  const [zones] = useState<ZoneRow[]>(initialZones);
   const [tables, setTables] = useState<TableRow[]>(initialTables);
   const [sessions, setSessions] = useState<TableSessionRow[]>(initialSessions);
   const [orderItems, setOrderItems] =
@@ -94,7 +91,6 @@ export function StaffDashboard({
   const [ingredients, setIngredients] =
     useState<IngredientRow[]>(initialIngredients);
 
-  const [selectedZoneId, setSelectedZoneId] = useState<string>('ALL');
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [qrModalSession, setQrModalSession] =
     useState<TableSessionRow | null>(null);
@@ -224,11 +220,6 @@ export function StaffDashboard({
         return timeA - timeB;
       });
   }, [orderItems]);
-
-  const filteredTables = useMemo(() => {
-    if (selectedZoneId === 'ALL') return tables;
-    return tables.filter((t) => t.zone_id === selectedZoneId);
-  }, [tables, selectedZoneId]);
 
   const activeTable = activeTableId ? tableMap.get(activeTableId) ?? null : null;
   const activeTableSession = activeTable
@@ -588,7 +579,7 @@ export function StaffDashboard({
     // Theo Mục 7 & Mục 3.2 AGENTS.md: Nhân viên (staff) tuyệt đối không được hủy món COOKING hoặc SERVED
     if (item.status !== 'QUEUED' && currentStaffRole !== 'admin' && currentStaffRole !== 'operator') {
       setErrorMessage(
-        'Nhân viên phục vụ chỉ được hủy món khi còn đang chờ Bếp (QUEUED). Món đã nấu hoặc đã bưng chỉ Admin mới có quyền hủy.'
+        'Nhân viên chỉ được hủy món chưa xong. Món đã làm xong hoặc đã mang ra cần nhờ chủ quán hủy.'
       );
       return;
     }
@@ -721,24 +712,24 @@ export function StaffDashboard({
   }, [activeTableOrders, menuMap]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-3 sm:p-6 space-y-6">
+    <div className="min-h-screen bg-soft text-ink p-3 sm:p-6 space-y-6">
       {/* Top Bar Nhân viên chạy bàn */}
-      <div role="status" className="border-b border-zinc-800 px-4 py-2 text-sm text-amber-300">
+      <div role="status" className="border-b border-line px-4 py-2 text-sm text-amber-800">
         {live.connected ? 'Đã kết nối thông báo nội bộ' : 'Đang kết nối lại thông báo...'}
         {live.alerts.length > 0 && <span> - {live.alerts[0].message} ({live.alerts.length})</span>}
       </div>
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface border border-line rounded-2xl p-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <h1 className="text-xl font-bold text-amber-400">
-              123Dzô • Phục vụ Chạy bàn (Realtime)
+            <h1 className="text-xl font-bold text-amber-800">
+              123Dzô • Phục vụ
             </h1>
-            <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-              Role: {currentStaffRole}
+            <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-emerald-500/15 text-emerald-800 border border-emerald-500/30">
+              {staffRoleLabel[currentStaffRole]}
             </span>
           </div>
-          <p className="text-xs text-zinc-400 mt-0.5">
+          <p className="text-xs text-muted-ink mt-0.5">
             Mở bàn sinh QR động, nhận chuông báo món chín & xử lý chuyển bàn / trả bia thừa.
           </p>
         </div>
@@ -747,9 +738,9 @@ export function StaffDashboard({
           <button
             type="button"
             onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
-            className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
+            className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-muted hover:bg-stone-200 text-xs font-semibold text-ink border border-line"
           >
-            <Volume2 className="h-4 w-4 text-amber-400" />
+            <Volume2 className="h-4 w-4 text-amber-800" />
             Kiểm tra chuông
           </button>
 
@@ -757,23 +748,23 @@ export function StaffDashboard({
             <>
               <Link
                 href="/admin"
-                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition-colors"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-800 transition-colors"
               >
-                <BarChart3 className="h-4 w-4 text-amber-400" />
-                Về Quản Trị (/admin)
+                <BarChart3 className="h-4 w-4 text-amber-800" />
+                Quản lý quán
               </Link>
               <Link
                 href="/kitchen"
-                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-orange-300 transition-colors"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-muted hover:bg-stone-200 border border-line text-xs font-semibold text-orange-800 transition-colors"
               >
-                <ChefHat className="h-4 w-4 text-orange-400" />
-                Bếp KDS (/kitchen)
+                <ChefHat className="h-4 w-4 text-orange-800" />
+                Bếp
               </Link>
             </>
           )}
 
           <div className="pl-1 flex items-center">
-            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-400">Bàn giao hệ thống</Link>}
+            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-800">Bàn giao hệ thống</Link>}
             <OnboardingGuideModal role={currentStaffRole} />
             <UserButton />
           </div>
@@ -781,12 +772,12 @@ export function StaffDashboard({
       </header>
 
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="p-4 rounded-xl bg-red-50/70 border border-red-500/50 text-red-800 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
             onClick={() => setErrorMessage(null)}
-            className="p-1 text-red-300 hover:text-white"
+            className="p-1 text-red-800 hover:text-ink"
           >
             <X className="h-5 w-5" />
           </button>
@@ -794,18 +785,18 @@ export function StaffDashboard({
       )}
 
       {/* KHAY THÔNG BÁO MÓN CHÍN / ĐỒ UỐNG CHỜ BƯNG (STATUS === 'READY') */}
-      <section className="bg-zinc-900 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+      <section className="bg-surface border border-amber-500/40 rounded-2xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BellRing className="h-5 w-5 text-amber-400 animate-bounce" />
-            <h2 className="font-bold text-base sm:text-lg text-zinc-100">
+            <BellRing className="h-5 w-5 text-amber-800 animate-bounce" />
+            <h2 className="font-bold text-base sm:text-lg text-ink">
               Món chín & Đồ uống chờ bưng ra bàn ({readyOrderItems.length})
             </h2>
           </div>
         </div>
 
         {readyOrderItems.length === 0 ? (
-          <div className="py-4 text-center text-xs text-zinc-500">
+          <div className="py-4 text-center text-xs text-muted-ink">
             Hiện không có món nào đang chờ bưng. Khi Bếp nấu xong hoặc khách gọi Bia, chuông sẽ tự động kêu!
           </div>
         ) : (
@@ -827,23 +818,23 @@ export function StaffDashboard({
                   className={cn(
                     'p-3.5 rounded-xl border flex flex-col justify-between gap-3',
                     isOverdueFallback
-                      ? 'bg-red-950/40 border-red-500/60'
-                      : 'bg-zinc-950 border-amber-500/40'
+                      ? 'bg-red-50/40 border-red-500/60'
+                      : 'bg-soft border-amber-500/40'
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-500 text-zinc-950">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-500 text-ink">
                         {table?.table_number ??
                           (session?.session_type === 'TAKEAWAY'
                             ? `Mang về (${session.customer_name ?? 'Khách'})`
                             : 'Bàn')}
                       </span>
-                      <h3 className="font-bold text-base text-zinc-100 mt-1.5">
+                      <h3 className="font-bold text-base text-ink mt-1.5">
                         {item.quantity}x {menu?.name ?? 'Món gọi'}
                       </h3>
                       {item.note && (
-                        <p className="text-xs text-amber-300 mt-0.5">
+                        <p className="text-xs text-amber-800 mt-0.5">
                           Ghi chú: {item.note}
                         </p>
                       )}
@@ -854,15 +845,15 @@ export function StaffDashboard({
                         className={cn(
                           'inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full',
                           isOverdueFallback
-                            ? 'bg-red-500/20 text-red-300'
-                            : 'bg-emerald-500/20 text-emerald-300'
+                            ? 'bg-red-500/20 text-red-800'
+                            : 'bg-emerald-500/20 text-emerald-800'
                         )}
                       >
                         <Clock className="h-3 w-3" />
                         {waitMinutes === 0 ? 'Vừa xong' : `${waitMinutes} phút`}
                       </span>
                       {isOverdueFallback && (
-                        <span className="block text-[10px] text-red-400 font-semibold mt-1">
+                        <span className="block text-[10px] text-red-800 font-semibold mt-1">
                           Quá 2p - Cần hỗ trợ bưng!
                         </span>
                       )}
@@ -873,10 +864,10 @@ export function StaffDashboard({
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => handleServeOrderItem(item)}
-                    className="min-h-12 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm transition-all"
+                    className="min-h-12 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] text-white font-bold text-sm transition-all"
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    Đã bưng lên bàn
+                    {session?.session_type === 'TAKEAWAY' ? 'Đã giao khách' : 'Đã bưng lên bàn'}
                   </button>
                 </div>
               );
@@ -885,42 +876,11 @@ export function StaffDashboard({
         )}
       </section>
 
-      {/* BỘ LỌC KHU VỰC (ZONES) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <button
-          type="button"
-          onClick={() => setSelectedZoneId('ALL')}
-          className={cn(
-            'min-h-12 px-4 py-2.5 rounded-xl text-sm font-semibold border shrink-0 transition-colors',
-            selectedZoneId === 'ALL'
-              ? 'bg-amber-500 text-zinc-950 border-amber-500'
-              : 'bg-zinc-900 text-zinc-300 border-zinc-800'
-          )}
-        >
-          Tất cả khu vực ({tables.length})
-        </button>
-        {zones.map((zone) => (
-          <button
-            key={zone.id}
-            type="button"
-            onClick={() => setSelectedZoneId(zone.id)}
-            className={cn(
-              'min-h-12 px-4 py-2.5 rounded-xl text-sm font-semibold border shrink-0 transition-colors',
-              selectedZoneId === zone.id
-                ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-800'
-            )}
-          >
-            {zone.name}
-          </button>
-        ))}
-      </div>
-
       {/* SƠ ĐỒ BÀN TRỰC QUAN & CHI TIẾT BÀN ĐANG CHỌN */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Cột trái: Sơ đồ bàn */}
         <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-3 gap-3.5 content-start">
-          {filteredTables.map((table) => {
+          {[...tables].sort((a,b) => a.table_number.localeCompare(b.table_number, 'vi', {numeric:true})).map((table) => {
             const session = sessionByTableId.get(table.id);
             const isOccupied = table.status === 'OCCUPIED' && Boolean(session);
             const isRequestingBill = session?.status === 'REQUEST_BILL';
@@ -949,16 +909,16 @@ export function StaffDashboard({
                     ? 'bg-rose-950/40 border-rose-500 ring-2 ring-rose-500/40'
                     : isOccupied
                     ? 'bg-amber-500/10 border-amber-500/40'
-                    : 'bg-zinc-900 border-zinc-800',
+                    : 'bg-surface border-line',
                   isSelected ? 'ring-2 ring-amber-400' : ''
                 )}
               >
                 <div className="flex items-start justify-between gap-1">
                   <div>
-                    <h3 className="text-lg font-extrabold text-zinc-100">
+                    <h3 className="text-lg font-extrabold text-ink">
                       {table.table_number}
                     </h3>
-                    <span className="text-[11px] text-zinc-400">
+                    <span className="text-[11px] text-muted-ink">
                       {assignedStaff
                         ? `NV: ${assignedStaff.full_name}`
                         : isOccupied
@@ -968,7 +928,7 @@ export function StaffDashboard({
                   </div>
 
                   {readyCount > 0 && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500 text-zinc-950">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500 text-ink">
                       {readyCount} món chín
                     </span>
                   )}
@@ -982,14 +942,14 @@ export function StaffDashboard({
                           'font-semibold',
                           isRequestingBill
                             ? 'text-rose-400 animate-pulse'
-                            : 'text-amber-300'
+                            : 'text-amber-800'
                         )}
                       >
                         {isRequestingBill
                           ? '🔔 GỌI TÍNH TIỀN'
                           : 'Đang nhậu (ACTIVE)'}
                       </span>
-                      <span className="font-bold text-sm text-zinc-100">
+                      <span className="font-bold text-sm text-ink">
                         {formatVND(session.total_amount)}
                       </span>
                     </div>
@@ -1001,7 +961,7 @@ export function StaffDashboard({
                           e.stopPropagation();
                           setQrModalSession(session);
                         }}
-                        className="min-h-12 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-amber-300 border border-zinc-700"
+                        className="min-h-12 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl bg-muted hover:bg-stone-200 text-xs font-semibold text-amber-800 border border-line"
                       >
                         <QrCode className="h-4 w-4" />
                         Mã QR
@@ -1012,7 +972,7 @@ export function StaffDashboard({
                           e.stopPropagation();
                           setActiveTableId(table.id);
                         }}
-                        className="min-h-12 inline-flex items-center justify-center px-2.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-zinc-950"
+                        className="min-h-12 inline-flex items-center justify-center px-2.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-ink"
                       >
                         Chi tiết
                       </button>
@@ -1023,7 +983,7 @@ export function StaffDashboard({
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => handleOpenTable(table)}
-                    className="min-h-12 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors"
+                    className="min-h-12 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors"
                   >
                     <QrCode className="h-4 w-4" />
                     Mở bàn & Tạo QR
@@ -1035,31 +995,31 @@ export function StaffDashboard({
         </div>
 
         {/* Cột phải: Bảng điều khiển chi tiết của Bàn đang chọn */}
-        <div className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5 h-fit">
+        <div className="lg:col-span-5 bg-surface border border-line rounded-2xl p-5 space-y-5 h-fit">
           {!activeTable || !activeTableSession ? (
-            <div className="py-12 text-center text-zinc-500 text-sm">
+            <div className="py-12 text-center text-muted-ink text-sm">
               Chọn một bàn đang mở ở bên trái để Order hộ khách, Chuyển bàn, Trả bia thừa hoặc Chốt thanh toán.
             </div>
           ) : (
             <>
-              <div className="flex items-start justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-start justify-between border-b border-line pb-4">
                 <div>
-                  <span className="text-xs text-amber-400 font-semibold">
+                  <span className="text-xs text-amber-800 font-semibold">
                     Đang quản lý phiên nhậu
                   </span>
-                  <h2 className="text-2xl font-extrabold text-zinc-100">
+                  <h2 className="text-2xl font-extrabold text-ink">
                     {activeTable.table_number}
                   </h2>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Mã phiên: <code className="text-zinc-200">{activeTableSession.session_token}</code>
+                  <p className="text-xs text-muted-ink mt-0.5">
+                    Bàn đang phục vụ
                   </p>
                 </div>
 
                 <div className="text-right">
-                  <span className="text-xs text-zinc-400 block">
+                  <span className="text-xs text-muted-ink block">
                     Tạm tính hiện tại
                   </span>
-                  <span className="text-2xl font-black text-amber-400">
+                  <span className="text-2xl font-black text-amber-800">
                     {formatVND(activeTableSession.total_amount)}
                   </span>
                 </div>
@@ -1070,7 +1030,7 @@ export function StaffDashboard({
                 <button
                   type="button"
                   onClick={() => setQrModalSession(activeTableSession)}
-                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold"
+                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 border border-amber-500/30 text-xs font-bold"
                 >
                   <QrCode className="h-4 w-4" />
                   Hiện QR Bàn
@@ -1079,7 +1039,7 @@ export function StaffDashboard({
                 <button
                   type="button"
                   onClick={() => setIsOrderModalOpen(true)}
-                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold"
                 >
                   <PlusCircle className="h-4 w-4" />
                   Order hộ khách
@@ -1093,7 +1053,7 @@ export function StaffDashboard({
                     setReturnBeerQuantity('1');
                     setIsReturnBeerModalOpen(true);
                   }}
-                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-bold"
+                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-800 border border-sky-500/30 text-xs font-bold"
                 >
                   <RotateCcw className="h-4 w-4" />
                   Trả bia thừa
@@ -1107,9 +1067,9 @@ export function StaffDashboard({
                     );
                     setIsTransferModalOpen(true);
                   }}
-                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-semibold"
+                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-muted hover:bg-stone-200 text-ink border border-line text-xs font-semibold"
                 >
-                  <ArrowRightLeft className="h-4 w-4 text-amber-400" />
+                  <ArrowRightLeft className="h-4 w-4 text-amber-800" />
                   Chuyển bàn
                 </button>
 
@@ -1123,9 +1083,9 @@ export function StaffDashboard({
                     );
                     setIsHandoverModalOpen(true);
                   }}
-                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-semibold"
+                  className="min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-muted hover:bg-stone-200 text-ink border border-line text-xs font-semibold"
                 >
-                  <UserCheck className="h-4 w-4 text-emerald-400" />
+                  <UserCheck className="h-4 w-4 text-emerald-800" />
                   Bàn giao bàn
                 </button>
 
@@ -1141,24 +1101,24 @@ export function StaffDashboard({
                   className={cn(
                     'min-h-12 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-extrabold',
                     canConfirmActiveTableBill
-                      ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950'
-                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      ? 'bg-amber-500 hover:bg-amber-400 text-ink'
+                      : 'bg-muted text-muted-ink cursor-not-allowed'
                   )}
                 >
                   <Receipt className="h-4 w-4" />
-                  Chốt & Đóng bill
+                  Chốt & Thanh toán
                 </button>
               </div>
 
               {/* Danh sách món đã gọi của bàn */}
               <div className="space-y-2.5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-ink">
                   Danh sách món của bàn ({activeTableOrders.length})
                 </h3>
 
-                <div className="divide-y divide-zinc-800/80 max-h-96 overflow-y-auto pr-1">
+                <div className="divide-y divide-line/80 max-h-96 overflow-y-auto pr-1">
                   {activeTableOrders.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-zinc-500">
+                    <p className="py-6 text-center text-xs text-muted-ink">
                       Bàn chưa gọi món nào.
                     </p>
                   ) : (
@@ -1175,7 +1135,7 @@ export function StaffDashboard({
                           className="py-3 flex items-center justify-between gap-2 text-sm"
                         >
                           <div className="min-w-0">
-                            <div className="font-semibold text-zinc-100 flex items-center gap-2">
+                            <div className="font-semibold text-ink flex items-center gap-2">
                               <span>
                                 {oi.quantity}x {menu?.name ?? 'Món ăn'}
                               </span>
@@ -1183,20 +1143,20 @@ export function StaffDashboard({
                                 className={cn(
                                   'px-2 py-0.5 rounded-full text-[10px] font-bold',
                                   oi.status === 'SERVED'
-                                    ? 'bg-zinc-800 text-zinc-300'
+                                    ? 'bg-muted text-ink'
                                     : oi.status === 'READY'
-                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    ? 'bg-emerald-500/20 text-emerald-800'
                                     : oi.status === 'COOKING'
-                                    ? 'bg-orange-500/20 text-orange-300'
+                                    ? 'bg-orange-500/20 text-orange-800'
                                     : oi.status === 'CANCELLED'
-                                    ? 'bg-red-500/20 text-red-400 line-through'
-                                    : 'bg-amber-500/20 text-amber-300'
+                                    ? 'bg-red-500/20 text-red-800 line-through'
+                                    : 'bg-amber-500/20 text-amber-800'
                                 )}
                               >
-                                {oi.status}
+                                {orderStatusLabel[oi.status]}
                               </span>
                             </div>
-                            <div className="text-xs text-zinc-400">
+                            <div className="text-xs text-muted-ink">
                               {formatVND(oi.unit_price * oi.quantity)}
                               {oi.note ? ` • Ghi chú: ${oi.note}` : ''}
                             </div>
@@ -1207,7 +1167,7 @@ export function StaffDashboard({
                               <button
                                 type="button"
                                 onClick={() => handleServeOrderItem(oi)}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold"
                               >
                                 Bưng ngay
                               </button>
@@ -1216,8 +1176,8 @@ export function StaffDashboard({
                               <button
                                 type="button"
                                 onClick={() => handleCancelQueuedItem(oi)}
-                                title="Hủy món đang chờ (QUEUED)"
-                                className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-300"
+                                title="Hủy món chưa xong"
+                                className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-800"
                               >
                                 <Ban className="h-4 w-4" />
                               </button>
@@ -1238,28 +1198,28 @@ export function StaffDashboard({
       {/* MODAL HIỂN THỊ MÃ QR ĐỘNG THẬT TO CHO KHÁCH QUÉT (MỤC 3.1) */}
       {/* ==================================================================== */}
       {qrModalSession && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-amber-500/50 rounded-3xl max-w-md w-full p-6 text-center space-y-5">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-amber-500/50 rounded-3xl max-w-md w-full p-6 text-center space-y-5">
             <div className="flex items-center justify-between">
-              <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-bold">
+              <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-800 text-xs font-bold">
                 Mã QR Động Theo Phiên
               </span>
               <button
                 type="button"
                 onClick={() => setQrModalSession(null)}
-                className="p-1 text-zinc-400 hover:text-white"
+                className="p-1 text-muted-ink hover:text-ink"
               >
                 <X className="h-6 w-6" />
               </button>
             </div>
 
             <div>
-              <h3 className="text-2xl font-black text-zinc-100">
+              <h3 className="text-2xl font-black text-ink">
                 {qrModalSession.table_id
                   ? tableMap.get(qrModalSession.table_id)?.table_number ?? 'Bàn'
                   : 'Phiên gọi món'}
               </h3>
-              <p className="text-xs text-zinc-400 mt-1">
+              <p className="text-xs text-muted-ink mt-1">
                 Đưa màn hình này cho khách quét để vào thẳng thực đơn của bàn
               </p>
             </div>
@@ -1274,14 +1234,14 @@ export function StaffDashboard({
             </div>
 
             <div className="space-y-2">
-              <p className="font-mono text-xs text-zinc-400 break-all">
+              <p className="font-mono text-xs text-muted-ink break-all">
                 {originUrl}/customer/order/{qrModalSession.session_token}
               </p>
               <a
                 href={`/customer/order/${qrModalSession.session_token}`}
                 target="_blank"
                 rel="noreferrer"
-                className="min-h-12 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-bold text-sm"
+                className="min-h-12 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-muted hover:bg-stone-200 text-amber-800 font-bold text-sm"
               >
                 <ExternalLink className="h-4 w-4" />
                 Mở trực tiếp trang gọi món của bàn này
@@ -1295,16 +1255,16 @@ export function StaffDashboard({
       {/* MODAL ORDER HỘ KHÁCH */}
       {/* ==================================================================== */}
       {isOrderModalOpen && activeTable && activeTableSession && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-2xl w-full p-5 space-y-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-2xl w-full p-5 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Order hộ khách • {activeTable.table_number}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsOrderModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1315,10 +1275,10 @@ export function StaffDashboard({
               value={orderSearch}
               onChange={(e) => setOrderSearch(e.target.value)}
               placeholder="Tìm nhanh mồi nhậu, bia, nước ngọt..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
             />
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800 space-y-2 pr-1">
+            <div className="flex-1 overflow-y-auto divide-y divide-line space-y-2 pr-1">
               {menuItems
                 .filter(
                   (m) =>
@@ -1331,18 +1291,18 @@ export function StaffDashboard({
                     className="pt-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
                   >
                     <div>
-                      <div className="font-bold text-sm text-zinc-100 flex items-center gap-2">
+                      <div className="font-bold text-sm text-ink flex items-center gap-2">
                         <span>{m.name}</span>
-                        <span className="text-xs font-semibold text-amber-400">
+                        <span className="text-xs font-semibold text-amber-800">
                           {formatVND(m.price)}
                         </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-ink">
                           {m.station === 'BAR_INSTANT' ? (
-                            <span className="inline-flex items-center gap-1 text-emerald-400">
+                            <span className="inline-flex items-center gap-1 text-emerald-800">
                               <Beer className="h-3 w-3" /> Lấy ngay
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-orange-400">
+                            <span className="inline-flex items-center gap-1 text-orange-800">
                               <UtensilsCrossed className="h-3 w-3" /> Bếp nấu
                             </span>
                           )}
@@ -1358,7 +1318,7 @@ export function StaffDashboard({
                           }))
                         }
                         placeholder="Ghi chú (ít cay, không hành, ướp lạnh...)"
-                        className="mt-1 w-full sm:w-64 px-2.5 py-1 rounded bg-zinc-950 border border-zinc-800 text-xs text-zinc-200"
+                        className="mt-1 w-full sm:w-64 px-2.5 py-1 rounded bg-soft border border-line text-xs text-ink"
                       />
                     </div>
 
@@ -1374,13 +1334,13 @@ export function StaffDashboard({
                             [m.id]: Math.max(1, Number(e.target.value) || 1),
                           }))
                         }
-                        className="w-16 px-2.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-center text-sm font-bold text-zinc-100"
+                        className="w-16 px-2.5 py-2 rounded-lg bg-soft border border-line text-center text-sm font-bold text-ink"
                       />
                       <button
                         type="button"
                         disabled={isSubmitting}
                         onClick={() => handleStaffAddOrderItem(m)}
-                        className="min-h-12 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs"
+                        className="min-h-12 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-ink font-bold text-xs"
                       >
                         + Thêm vào bàn
                       </button>
@@ -1396,16 +1356,16 @@ export function StaffDashboard({
       {/* MODAL CHUYỂN BÀN (MỤC 6.3) */}
       {/* ==================================================================== */}
       {isTransferModalOpen && activeTable && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Chuyển bàn từ {activeTable.table_number}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsTransferModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1413,14 +1373,14 @@ export function StaffDashboard({
 
             <form onSubmit={handleTransferTable} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                <label className="block text-xs font-medium text-ink mb-1.5">
                   Chọn bàn trống cần chuyển tới *
                 </label>
                 <select
                   required
                   value={targetTransferTableId}
                   onChange={(e) => setTargetTransferTableId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
                 >
                   {availableTablesForTransfer.length === 0 ? (
                     <option value="">-- Không còn bàn trống --</option>
@@ -1432,7 +1392,7 @@ export function StaffDashboard({
                     ))
                   )}
                 </select>
-                <p className="text-xs text-zinc-400 mt-2">
+                <p className="text-xs text-muted-ink mt-2">
                   Mã QR phiên của khách vẫn giữ nguyên hiệu lực, các món đang nấu trong Bếp sẽ tự động đổi sang số bàn mới.
                 </p>
               </div>
@@ -1441,7 +1401,7 @@ export function StaffDashboard({
                 <button
                   type="button"
                   onClick={() => setIsTransferModalOpen(false)}
-                  className="min-h-12 px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-sm"
+                  className="min-h-12 px-4 py-2 rounded-xl bg-muted text-ink text-sm"
                 >
                   Hủy
                 </button>
@@ -1450,7 +1410,7 @@ export function StaffDashboard({
                   disabled={
                     isSubmitting || availableTablesForTransfer.length === 0
                   }
-                  className="min-h-12 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-sm"
+                  className="min-h-12 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-ink font-bold text-sm"
                 >
                   Xác nhận chuyển bàn
                 </button>
@@ -1464,16 +1424,16 @@ export function StaffDashboard({
       {/* MODAL BÀN GIAO BÀN CHO ĐỒNG NGHIỆP */}
       {/* ==================================================================== */}
       {isHandoverModalOpen && activeTable && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Bàn giao {activeTable.table_number} cho đồng nghiệp
               </h3>
               <button
                 type="button"
                 onClick={() => setIsHandoverModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1481,14 +1441,14 @@ export function StaffDashboard({
 
             <form onSubmit={handleHandoverTable} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                <label className="block text-xs font-medium text-ink mb-1.5">
                   Chọn nhân viên nhận bàn *
                 </label>
                 <select
                   required
                   value={targetHandoverStaffId}
                   onChange={(e) => setTargetHandoverStaffId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
                 >
                   {staffProfiles
                     .filter(
@@ -1498,7 +1458,7 @@ export function StaffDashboard({
                     )
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.full_name} ({s.role})
+                        {s.full_name} ({staffRoleLabel[s.role]})
                       </option>
                     ))}
                 </select>
@@ -1508,14 +1468,14 @@ export function StaffDashboard({
                 <button
                   type="button"
                   onClick={() => setIsHandoverModalOpen(false)}
-                  className="min-h-12 px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-sm"
+                  className="min-h-12 px-4 py-2 rounded-xl bg-muted text-ink text-sm"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="min-h-12 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
+                  className="min-h-12 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm"
                 >
                   Xác nhận bàn giao
                 </button>
@@ -1529,30 +1489,30 @@ export function StaffDashboard({
       {/* MODAL TRẢ LẠI BIA THỪA (MỤC 6.2) */}
       {/* ==================================================================== */}
       {isReturnBeerModalOpen && activeTable && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Trả lại bia / đồ uống thừa • {activeTable.table_number}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsReturnBeerModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {returnableDrinkItems.length === 0 ? (
-              <p className="text-sm text-zinc-400 py-4">
+              <p className="text-sm text-muted-ink py-4">
                 Bàn này chưa có dòng bia hoặc đồ uống nào để trả lại.
               </p>
             ) : (
               <form onSubmit={handleReturnBeer} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                    Chọn dòng bia / đồ uống trong bill *
+                  <label className="block text-xs font-medium text-ink mb-1.5">
+                    Chọn dòng bia / đồ uống trong hóa đơn *
                   </label>
                   <select
                     required
@@ -1560,7 +1520,7 @@ export function StaffDashboard({
                     onChange={(e) =>
                       setSelectedReturnOrderItemId(e.target.value)
                     }
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
                   >
                     {returnableDrinkItems.map((item) => {
                       const m = menuMap.get(item.menu_item_id);
@@ -1574,7 +1534,7 @@ export function StaffDashboard({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                  <label className="block text-xs font-medium text-ink mb-1.5">
                     Số lượng khách trả lại *
                   </label>
                   <input
@@ -1584,10 +1544,10 @@ export function StaffDashboard({
                     required
                     value={returnBeerQuantity}
                     onChange={(e) => setReturnBeerQuantity(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
                   />
-                  <p className="text-xs text-zinc-400 mt-1.5">
-                    Hệ thống sẽ tự động trừ số lượng trên hóa đơn, cộng hoàn trả vào kho nguyên liệu (`ingredients`) và ghi nhật ký `RETURN_BEER`.
+                  <p className="text-xs text-muted-ink mt-1.5">
+                    Bia trả lại được trừ khỏi hóa đơn và cộng lại vào kho.
                   </p>
                 </div>
 
@@ -1595,16 +1555,16 @@ export function StaffDashboard({
                   <button
                     type="button"
                     onClick={() => setIsReturnBeerModalOpen(false)}
-                    className="min-h-12 px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-sm"
+                    className="min-h-12 px-4 py-2 rounded-xl bg-muted text-ink text-sm"
                   >
                     Hủy
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="min-h-12 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold text-sm"
+                    className="min-h-12 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-ink font-bold text-sm"
                   >
-                    Hoàn trả bia & Cập nhật bill
+                    Hoàn trả bia & Cập nhật hóa đơn
                   </button>
                 </div>
               </form>
@@ -1617,31 +1577,31 @@ export function StaffDashboard({
       {/* MODAL CHỐT THANH TOÁN & ĐÓNG PHIÊN BÀN */}
       {/* ==================================================================== */}
       {isCheckoutModalOpen && activeTable && activeTableSession && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Chốt thanh toán • {activeTable.table_number}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsCheckoutModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <form onSubmit={handleCloseSessionBill} className="space-y-4">
-              <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
-                <span className="text-sm text-zinc-400">Tổng thanh toán:</span>
-                <span className="text-2xl font-black text-amber-400">
+              <div className="p-4 rounded-xl bg-soft border border-line flex items-center justify-between">
+                <span className="text-sm text-muted-ink">Tổng thanh toán:</span>
+                <span className="text-2xl font-black text-amber-800">
                   {formatVND(activeTableSession.total_amount)}
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                <label className="block text-xs font-medium text-ink mb-1.5">
                   Phương thức thanh toán *
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1651,11 +1611,11 @@ export function StaffDashboard({
                     className={cn(
                       'min-h-12 p-3 rounded-xl border text-sm font-bold',
                       checkoutPaymentMethod === 'CASH'
-                        ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                        : 'bg-zinc-950 text-zinc-300 border-zinc-800'
+                        ? 'bg-amber-500 text-ink border-amber-500'
+                        : 'bg-soft text-ink border-line'
                     )}
                   >
-                    Tiền mặt (CASH)
+                    Tiền mặt
                   </button>
                   <button
                     type="button"
@@ -1663,11 +1623,11 @@ export function StaffDashboard({
                     className={cn(
                       'min-h-12 p-3 rounded-xl border text-sm font-bold',
                       checkoutPaymentMethod === 'VIETQR'
-                        ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                        : 'bg-zinc-950 text-zinc-300 border-zinc-800'
+                        ? 'bg-amber-500 text-ink border-amber-500'
+                        : 'bg-soft text-ink border-line'
                     )}
                   >
-                    Chuyển khoản (VIETQR)
+                    Chuyển khoản
                   </button>
                 </div>
               </div>
@@ -1676,14 +1636,14 @@ export function StaffDashboard({
                 <button
                   type="button"
                   onClick={() => setIsCheckoutModalOpen(false)}
-                  className="min-h-12 px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-sm"
+                  className="min-h-12 px-4 py-2 rounded-xl bg-muted text-ink text-sm"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="min-h-12 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
+                  className="min-h-12 px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm"
                 >
                   Xác nhận đã thu tiền & Đóng bàn
                 </button>

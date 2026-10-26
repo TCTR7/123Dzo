@@ -6,10 +6,10 @@ vi.mock('@/lib/auth/roles', async (importOriginal) => ({ ...await importOriginal
 vi.mock('@/lib/supabase/server', () => ({ createSupabaseServiceRoleClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: m.existing }) }), upsert: m.upsert }) }) }));
 import { POST } from '@/app/api/accounts/provision/route';
 
-const request = (input: Record<string, unknown> = {}) => new Request('https://pub.example/api/accounts/provision', { method: 'POST', body: JSON.stringify({ fullName: 'Nhân viên', username: 'nhanvien', password: 'initial123', role: 'staff', ...input }) });
+const request = (input: Record<string, unknown> = {}) => new Request('https://pub.example/api/accounts/provision', { method: 'POST', body: JSON.stringify({ fullName: 'Nhân viên', username: '0912345678', password: 'initial123', role: 'staff', ...input }) });
 beforeEach(() => {
   vi.stubEnv('OPERATOR_EMAILS', ''); vi.stubEnv('OPERATOR_CLERK_USER_IDS', ''); vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://pub.example');
-  m.actor.mockResolvedValue({ id: 'actor', role: 'admin' });
+  m.actor.mockResolvedValue({ id: 'actor', role: 'admin', is_active: true });
   m.list.mockResolvedValue({ data: [] });
   m.create.mockResolvedValue({ id: 'user_new' }); m.update.mockResolvedValue({ id: 'user_existing' });
   m.remove.mockResolvedValue({}); m.existing.mockResolvedValue({ data: null, error: null });
@@ -24,29 +24,38 @@ describe('Account provisioning', () => {
   it.each(['admin', 'operator'])('prevents admin from granting %s', async (role) => {
     expect((await POST(request({ role }))).status).toBe(403); expect(m.list).not.toHaveBeenCalled();
   });
-  it('prevents admin provisioning a reserved operator email', async () => {
-    vi.stubEnv('OPERATOR_EMAILS', 'deploy@example.com');
-    expect((await POST(request({ emailAddress: 'deploy@example.com' }))).status).toBe(403);
+  it('rejects email-only and non-phone usernames', async () => {
+    expect((await POST(request({ username: 'oldname' }))).status).toBe(400);
+    expect((await POST(request({ username: '', emailAddress: 'test@example.com' }))).status).toBe(400);
     expect(m.create).not.toHaveBeenCalled();
+  });
+  it('normalizes a phone username and never enables SMS authentication', async () => {
+    expect((await POST(request({ username: undefined, phoneNumber: '+84 912 345 678' }))).status).toBe(200);
+    expect(m.create).toHaveBeenCalledWith(expect.objectContaining({ username: '0912345678' }));
+    expect(m.create.mock.calls[0][0].phoneNumber).toBeUndefined();
+  });
+  it('rejects inactive managers', async () => {
+    m.actor.mockResolvedValue({ id: 'actor', role: 'admin', is_active: false });
+    expect((await POST(request())).status).toBe(403);
   });
   it('creates a login, synchronizes the profile and returns usable credentials', async () => {
     const response = await POST(request()); const body = await response.json();
     expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(m.create).toHaveBeenCalledWith(expect.objectContaining({ username: 'nhanvien', password: 'initial123' }));
+    expect(m.create).toHaveBeenCalledWith(expect.objectContaining({ username: '0912345678', password: 'initial123' }));
     expect(m.upsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'user_new', role: 'staff', is_active: true, assigned_zone_id: null }), { onConflict: 'id' });
-    expect(body.credentials).toEqual({ loginIdentifier: 'nhanvien', password: 'initial123', loginUrl: 'https://pub.example/staff' });
+    expect(body.credentials).toEqual({ loginIdentifier: '0912345678', password: 'initial123', loginUrl: 'https://pub.example/staff' });
   });
   it('allows an operator to create an admin', async () => {
-    m.actor.mockResolvedValue({ id: 'actor', role: 'operator' });
+    m.actor.mockResolvedValue({ id: 'actor', role: 'operator', is_active: true });
     expect((await POST(request({ role: 'admin' }))).status).toBe(200);
   });
   it('does not reset an existing higher-privilege account password', async () => {
-    m.list.mockResolvedValue({ data: [{ id: 'user_existing', username: 'nhanvien', emailAddresses: [] }] });
+    m.list.mockResolvedValue({ data: [{ id: 'user_existing', username: '0912345678', emailAddresses: [] }] });
     m.existing.mockResolvedValue({ data: { role: 'operator' }, error: null });
     expect((await POST(request())).status).toBe(403); expect(m.update).not.toHaveBeenCalled();
   });
   it('reuses an existing manageable Clerk user', async () => {
-    m.list.mockResolvedValue({ data: [{ id: 'user_existing', username: 'nhanvien', emailAddresses: [] }] });
+    m.list.mockResolvedValue({ data: [{ id: 'user_existing', username: '0912345678', emailAddresses: [] }] });
     m.existing.mockResolvedValue({ data: { role: 'staff' }, error: null });
     expect((await POST(request())).status).toBe(200); expect(m.create).not.toHaveBeenCalled();
     expect(m.update).toHaveBeenCalledWith('user_existing', expect.objectContaining({ password: 'initial123' }));

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { memoryDatabase } from './helpers/memory-db';
 
-const mocks = vi.hoisted(() => ({ actor: vi.fn(), db: { current: null as unknown } }));
+const mocks = vi.hoisted(() => ({ actor: vi.fn(), payment: vi.fn(), db: { current: null as unknown } }));
+vi.mock('@/lib/payments/settings', () => ({ readPaymentSettings: mocks.payment }));
 vi.mock('@/lib/auth/roles', async (original) => ({ ...await original<typeof import('@/lib/auth/roles')>(), getCurrentStaffProfile: mocks.actor }));
 vi.mock('@/lib/supabase/server', () => ({ createSupabaseServiceRoleClient: () => mocks.db.current }));
 import { proxyToSupabase } from '@/lib/services/proxy';
@@ -26,6 +27,7 @@ const proxy = (table: string, method = 'GET', body?: unknown, query = '') => pro
 
 beforeEach(() => {
   db = memoryDatabase({ table_sessions: [{ ...session }], menu_items: [{ ...menu }], order_items: [{ ...item }], ingredients: [{ id: iid, stock_quantity: 10, unit_cost: 12000, name: 'Beer' }], tables: [], staff_profiles: [actor()] });
+  mocks.payment.mockResolvedValue({ bankBin: '970407', bankName: 'Techcombank', accountNumber: '1234567890', accountName: 'NGUYEN VAN A' });
   mocks.db.current = db; mocks.actor.mockResolvedValue(actor());
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'server-secret'); vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co');
   vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } })));
@@ -76,13 +78,38 @@ describe('Server-enforced proxy permissions', () => {
     expect(db.data.order_items[0].served_by_staff_id).toBe('user_staff');
     expect(db.data.order_items[0].served_at).not.toBe('1900-01-01');
   });
-  it('requires QUEUED -> COOKING -> READY and stamps both kitchen timestamps', async () => {
+  it('supports completing legacy cooking items with server timestamps', async () => {
     mocks.actor.mockResolvedValue(actor('kitchen')); db.data.order_items[0].station = 'KITCHEN'; db.data.order_items[0].status = 'QUEUED';
-    expect((await proxy('order_items', 'PATCH', { status: 'READY' }, `?id=eq.${oid}`)).status).toBe(403);
     expect((await proxy('order_items', 'PATCH', { status: 'COOKING' }, `?id=eq.${oid}`)).status).toBe(200);
     expect(db.data.order_items[0].cooking_started_at).toBeTruthy();
     expect((await proxy('order_items', 'PATCH', { status: 'READY' }, `?id=eq.${oid}`)).status).toBe(200);
     expect(db.data.order_items[0].ready_at).toBeTruthy();
+  });
+  it('completes queued food with one request and does not fabricate the cooking start time', async () => {
+    mocks.actor.mockResolvedValue(actor('kitchen'));
+    Object.assign(db.data.order_items[0], { station: 'KITCHEN', status: 'QUEUED', cooking_started_at: null });
+    expect((await proxy('order_items', 'PATCH', { status: 'READY', ready_at: '1900-01-01' }, `?id=eq.${oid}`)).status).toBe(200);
+    expect(db.data.order_items[0].cooking_started_at).toBeNull();
+    expect(db.data.order_items[0].ready_at).not.toBe('1900-01-01');
+    expect((await readSnapshot(null, session.session_token)).orders[0].status).toBe('READY');
+  });
+  it.each(['PENDING_PAYMENT','CLOSED'])('never completes food in a %s session', async status => {
+    mocks.actor.mockResolvedValue(actor('kitchen')); db.data.order_items[0].station = 'KITCHEN'; db.data.order_items[0].status = 'QUEUED'; db.data.table_sessions[0].status = status;
+    expect((await proxy('order_items','PATCH',{status:'READY'},`?id=eq.${oid}`)).status).toBe(409);
+    expect(db.writes).toHaveLength(0);
+  });
+  it('adds a numbered table with no user-managed zone, even on an empty database', async () => {
+    mocks.actor.mockResolvedValue(actor('admin'));
+    expect((await proxy('tables','POST',{table_number:'1'})).status).toBe(200);
+    expect(db.data.tables[0]).toMatchObject({table_number:'Bàn 1',status:'AVAILABLE'});
+    expect(db.data.zones).toHaveLength(1);
+    expect((await proxy('tables','POST',{table_number:'01'})).status).toBe(409);
+    expect(db.data.tables).toHaveLength(1);
+  });
+  it('does not create takeaway before the receiving account is configured', async () => {
+    mocks.payment.mockResolvedValue(null);
+    expect((await customerOrder(json({customerName:'Guest',customerPhone:'0912345678',items:[{menu_item_id:mid,quantity:1}]}))).status).toBe(503);
+    expect(db.writes).toHaveLength(0);
   });
   it('prevents staff closing a different employee table', async () => {
     db.data.table_sessions[0].assigned_staff_id = 'user_other';

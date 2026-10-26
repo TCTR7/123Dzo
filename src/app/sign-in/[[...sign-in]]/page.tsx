@@ -1,35 +1,16 @@
-import { SignIn } from '@clerk/nextjs';
+import { auth } from '@clerk/nextjs/server';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { Beer } from 'lucide-react';
-
-export default function SignInPage() {
-  return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-4">
-      <div className="mb-6 flex items-center gap-3">
-        <div className="h-11 w-11 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
-          <Beer className="h-6 w-6" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-amber-400">123Dzô • Nội Bộ</h1>
-          <p className="text-xs text-zinc-400">
-            Đăng nhập dành cho Quản lý, Bếp & Nhân viên phục vụ
-          </p>
-        </div>
-      </div>
-
-      <SignIn
-        routing="path"
-        path="/sign-in"
-        signUpUrl="/sign-up"
-        fallbackRedirectUrl="/admin"
-      />
-
-      <Link
-        href="/"
-        className="mt-6 text-xs text-zinc-400 hover:text-amber-400 transition-colors"
-      >
-        ← Quay về Trang chủ 123Dzô
-      </Link>
-    </div>
-  );
+import { PhoneSignInForm } from '@/components/shared/PhoneSignInForm';
+import { internalDestination } from '@/lib/auth/navigation';
+export default async function SignInPage({ searchParams }: { searchParams: Promise<{ redirect_url?: string }> }) {
+  const head = await headers();
+  const origin = new URL(process.env.NEXT_PUBLIC_APP_URL || (head.get('x-forwarded-proto') || 'http') + '://' + head.get('host')).origin;
+  const returnTo = internalDestination((await searchParams).redirect_url, origin) || undefined;
+  if ((await auth()).userId) redirect(returnTo ? '/?returnTo=' + encodeURIComponent(returnTo) : '/');
+  return <main className="min-h-screen bg-soft flex flex-col items-center justify-center gap-6 p-5">
+    <div className="text-center"><span className="text-sm font-bold tracking-widest text-teal-800">123DZÔ · QUÁN MÌNH</span><h1 className="mt-2 text-3xl font-bold text-ink">Mỗi ca làm, nhẹ nhàng hơn.</h1><p className="mt-2 text-muted-ink">Dành cho chủ quán, phục vụ và đầu bếp</p></div>
+    <PhoneSignInForm returnTo={returnTo} /><Link href="/customer/takeaway" className="min-h-12 p-3 text-sm text-muted-ink">← Khách đặt mang về</Link>
+  </main>;
 }

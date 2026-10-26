@@ -1,11 +1,11 @@
 {
-  "name": "123Dzô - Smart POS & KDS PWA",
+  "name": "123Dzô - Gọi món & Quản lý quán",
   "short_name": "123Dzô",
   "description": "Hệ thống Quản lý Quán nhậu, Gọi món QR & Điều phối Bếp thời gian thực",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#f59e0b",
+  "background_color": "#edf2ef",
+  "theme_color": "#0f766e",
   "orientation": "any",
   "icons": [
     {

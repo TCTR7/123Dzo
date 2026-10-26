@@ -27,8 +27,7 @@ export function staffAlerts(actor: StaffProfileRow, sessions: TableSessionRow[],
     const table = tables.find((entry) => entry.id === session.table_id);
     const overdue = now - Date.parse(item.ready_at!) >= 120000;
     const own = session.assigned_staff_id === actor.id;
-    const inZone = Boolean(table && table.zone_id === actor.assigned_zone_id);
-    if (!manager && !own && !(inZone && (overdue || !session.assigned_staff_id))) return [];
+    if (!manager && !own && !(actor.role === 'staff' && (overdue || !session.assigned_staff_id))) return [];
     return [{ id: `${item.id}:${overdue ? 'overdue' : 'ready'}`, message: `${overdue ? 'Món chờ hơn 2 phút – cần hỗ trợ' : 'Món đã sẵn sàng'} · ${table?.table_number ?? 'Mang về'}` }];
   }).concat(sessions.filter((session) => (manager || session.assigned_staff_id === actor.id) && session.status === 'REQUEST_BILL').map((session) => ({ id: `${session.id}:bill`, message: `${tables.find((table) => table.id === session.table_id)?.table_number ?? 'Khách'} gọi tính tiền` })));
 }

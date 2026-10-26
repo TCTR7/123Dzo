@@ -1,3 +1,4 @@
+import { readPaymentSettings } from '@/lib/payments/settings';
 import { publicMenu } from '@/lib/services/snapshots';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { TakeawayOrderView } from '@/components/customer/TakeawayOrderView';
@@ -15,5 +16,6 @@ export default async function TakeawayPage() {
     .order('category', { ascending: true })
     .order('name', { ascending: true });
 
-  return <TakeawayOrderView initialMenuItems={(menuItems ?? []).map(publicMenu)} />;
+  const paymentSettings = await readPaymentSettings().catch(() => null);
+  return <TakeawayOrderView initialPaymentSettings={paymentSettings} initialMenuItems={(menuItems ?? []).map(publicMenu)} />;
 }

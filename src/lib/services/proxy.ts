@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { canManageRole, getCurrentStaffProfile, isConfiguredOperator, isManager, isStaffRole } from '@/lib/auth/roles';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
+import { restaurantZone, numberedTable } from './tables';
 import { ApiError, assertAllowed, objectBody } from './errors';
 import { activateTakeaway, addOrderItems, getSession, ownsSession, recalculateTotal } from './orders';
 import type { OrderItemRow, OrderItemUpdate, StaffProfileRow, TableSessionUpdate } from '@/types/database.types';
@@ -128,7 +129,7 @@ async function writeOrders(req: NextRequest, body: unknown, actor: StaffProfileR
         assertAllowed(input.batch_id == null || typeof input.batch_id === 'string' && uuid.test(input.batch_id), 'Mã mẻ không hợp lệ.', 400);
         data = { status: 'COOKING', cooking_started_at: now, batch_id: (input.batch_id as string | null) ?? null }; break;
       case 'READY':
-        assertAllowed((actor.role === 'kitchen' || isManager(actor.role)) && item.station === 'KITCHEN' && item.status === 'COOKING');
+        assertAllowed((actor.role === 'kitchen' || isManager(actor.role)) && item.station === 'KITCHEN' && ['QUEUED', 'COOKING'].includes(item.status));
         data = { status: 'READY', ready_at: now }; break;
       case 'SERVED':
         assertAllowed((actor.role === 'staff' || isManager(actor.role)) && item.status === 'READY');
@@ -172,6 +173,20 @@ export async function proxyToSupabase(req: NextRequest, params: Promise<{ path: 
         if (table === 'order_items') return await writeOrders(req, body, actor);
         const data = objectBody(body);
         if (table === 'table_sessions') return await writeSession(req, data, actor);
+        if (table === 'tables' && req.method === 'POST') {
+          assertAllowed(isManager(actor.role));
+          onlyKeys(data, ['table_number']);
+          const label = numberedTable(data.table_number);
+          assertAllowed(label, 'Nhập số bàn từ 1 đến 9999.', 400);
+          const db = createSupabaseServiceRoleClient();
+          const duplicate = await db.from('tables').select('id').eq('table_number', label).maybeSingle();
+          assertAllowed(!duplicate.error, 'Chưa kiểm tra được số bàn.', 502);
+          assertAllowed(!duplicate.data, 'Số bàn này đã có rồi.', 409);
+          const zoneId = await restaurantZone(db);
+          const row = await db.from('tables').insert({ table_number: label, zone_id: zoneId, status: 'AVAILABLE' }).select('*').single();
+          assertAllowed(!row.error && row.data, 'Chưa thêm được bàn. Vui lòng thử lại.', 502);
+          return result(req, [row.data]);
+        }
         if (table === 'tables' && req.method === 'PATCH' && (!isManager(actor.role) || Object.keys(data).every((key) => ['status', 'current_session_id'].includes(key)))) {
           onlyKeys(data, ['status', 'current_session_id']); const ids = idsForWrite(req);
           const rows = await createSupabaseServiceRoleClient().from('tables').select('*').in('id', ids);

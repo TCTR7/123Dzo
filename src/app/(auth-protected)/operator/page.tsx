@@ -20,11 +20,11 @@ export default async function OperatorPage() {
     })),
     (await clerkClient()).users.getUser(profile.id).then(() => true, () => false),
   ]);
-  return <div className="min-h-screen bg-zinc-950 p-4 text-zinc-100 md:p-8">
+  return <div className="min-h-screen bg-soft p-4 text-ink md:p-8">
     <header className="operator-screen-only mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-4">
-      <div><p className="text-xs font-bold tracking-widest text-amber-400">123DZÔ · OPERATOR</p><h1 className="text-2xl font-bold">Bàn giao hệ thống</h1></div>
+      <div><p className="text-xs font-bold tracking-widest text-amber-800">123DZÔ · OPERATOR</p><h1 className="text-2xl font-bold">Bàn giao hệ thống</h1></div>
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/admin" className="text-sm text-amber-400">Quản trị quán</Link>
+        <Link href="/admin" className="text-sm text-amber-800">Quản trị quán</Link>
         <Link href="/staff" className="text-sm">Phục vụ</Link>
         <Link href="/kitchen" className="text-sm">Bếp</Link>
         <OnboardingGuideModal role="operator" /><UserButton />

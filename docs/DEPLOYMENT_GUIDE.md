@@ -80,11 +80,11 @@ Nếu cần lấy lại khóa: **Supabase → Project Settings → API Keys → 
 2. Giữ môi trường **Development**. Nếu đang ở form tạo Production hỏi domain thì thoát form đó.
 3. Vào **User & authentication**, kiểm tra:
    - **Username:** bật, không bắt buộc.
-   - **Email:** bật, không bắt buộc, để tạo tài khoản bằng email hoặc username.
+   - **Email:** không bắt buộc; có thể giữ Google cho tài khoản operator cũ. Chủ quán/nhân viên mới dùng số điện thoại làm Username và mật khẩu, không dùng SMS.
    - **Password:** bật.
    - **First name:** bật; **Last name / Phone number:** không bắt buộc.
 4. Vào **Access mode → Invite-only → Save** để người ngoài không tự đăng ký.
-5. Vào **Users**, mở tài khoản bạn dùng để triển khai. Nếu chưa có: **Create user**, nhập username, họ tên và mật khẩu của bạn.
+5. Vào **Users**, mở tài khoản bạn dùng để triển khai. Nếu chưa có: **Create user**, nhập số di động Việt Nam vào Username, họ tên và mật khẩu; ví dụ Username là 0912345678.
 6. Copy **User ID** dạng `user_...` của tài khoản này; giữ lại để điền `OPERATOR_CLERK_USER_IDS`.
 7. Vào **API Keys**, lấy cặp khóa **`pk_test_...`** và **`sk_test_...`**. Có thể copy từ `.env.local` nếu đã đúng application.
 
@@ -108,18 +108,12 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 
 OPERATOR_CLERK_USER_IDS=PASTE_USER_ID_FROM_CLERK_DEVELOPMENT
 
-NEXT_PUBLIC_VIETQR_BANK_ID=MB
-NEXT_PUBLIC_VIETQR_ACCOUNT_NO=YOUR_BANK_ACCOUNT_NUMBER
-NEXT_PUBLIC_VIETQR_ACCOUNT_NAME=TEN CHU TAI KHOAN
 ```
 
 Điền chính xác:
 
 - Hai khóa Clerk phải là `pk_test_...` / `sk_test_...` lấy ở bước 3.2.
 - `OPERATOR_CLERK_USER_IDS` là **User ID `user_...`**, không phải username/email.
-- `NEXT_PUBLIC_VIETQR_BANK_ID`: ví dụ `MB` nếu nhận tiền bằng MBBank.
-- `NEXT_PUBLIC_VIETQR_ACCOUNT_NO`: số tài khoản ngân hàng nhận tiền của quán.
-- `NEXT_PUBLIC_VIETQR_ACCOUNT_NAME`: tên chủ tài khoản ngân hàng.
 - Không thêm dấu nháy bao ngoài giá trị trong giao diện Vercel.
 
 **Lần deploy đầu chưa thêm `NEXT_PUBLIC_APP_URL` vì chưa có URL. Không copy dòng localhost từ `.env.local`.** App sẽ dùng địa chỉ request hiện tại khi chưa có biến này.
@@ -156,21 +150,34 @@ Từ đây, dùng URL thật lấy ở bước 5. Ví dụ URL là `https://123d
 
 1. Mở **URL app + `/operator`**.
 2. Đăng nhập bằng tài khoản **Clerk Development** có User ID đã điền ở bước 4.
-3. Kiểm tra trang hiển thị **Supabase Connected**, **Clerk Connected** và version.
+3. Kiểm tra trang hiển thị **Dữ liệu: Đã kết nối**, **Đăng nhập: Đã kết nối** và phiên bản.
 4. Nếu chưa có bàn/món, có thể bấm **Tạo dữ liệu mẫu**.
-5. Nhập thông tin quán, tên Chủ quán, username và mật khẩu khởi tạo → **Tạo Tài Khoản Chủ Quán & Sinh Phiếu Bàn Giao**.
+5. Nhập thông tin quán, tên Chủ quán, số điện thoại và mật khẩu khởi tạo → **Tạo Tài Khoản Chủ Quán & Sinh Phiếu Bàn Giao**.
 6. Tải PNG hoặc in PDF ngay sau khi tạo; phiếu có mật khẩu nên gửi riêng.
 7. Mở cửa sổ ẩn danh → **URL app + `/admin`** → đăng nhập bằng tài khoản Chủ quán vừa tạo.
-8. Vào **Bàn & Nhân sự**, tạo một tài khoản **staff** và một tài khoản **kitchen** bằng username + mật khẩu.
+8. Vào **Bàn & Nhân sự**, tạo một tài khoản **staff** và một tài khoản **kitchen** bằng số điện thoại + mật khẩu.
 9. Đăng nhập thử staff ở `/staff`, kitchen ở `/kitchen`.
 
 Nếu bị access-denied: kiểm tra User ID trên Vercel có đúng tài khoản đang đăng nhập trong **Development** không. Sửa env xong phải **Save → Redeploy**.
+
+### Thiết lập QR nhận tiền trước khi thử đơn mang về
+
+1. Chủ quán đăng nhập /admin lần đầu: hộp thiết lập nhận tiền tự mở nếu quán chưa có tài khoản nhận tiền.
+2. Hoặc operator/chủ quán mở **Thu ngân & Hóa đơn → Thiết lập nhận tiền**.
+3. Trong ứng dụng ngân hàng, tải ảnh QR của tài khoản nhận tiền. Chọn ảnh đó trong ứng dụng quán.
+4. Kiểm tra ngân hàng, số tài khoản; nhập đúng tên người nhận. Đánh dấu xác nhận rồi bấm **Lưu tài khoản nhận tiền**.
+5. Supabase Storage dùng bucket **menu-images** hiện có. Tại cài đặt bucket, mục loại tệp được phép phải có **image/webp** và **application/json**. Giữ quyền ghi từ máy chủ như cấu hình hiện tại.
+6. Thông tin dùng chung lưu ở **menu-images/settings/payment.json**. Ảnh QR được đọc trên thiết bị, không tải ảnh gốc lên máy chủ.
+7. Mỗi đơn tạo mã chuyển khoản mới theo tiền và mã đơn thực tế. Khi chưa có tài khoản nhận tiền, khách vẫn xem thực đơn được nhưng chưa tạo đơn mang về.
+8. Ba biến NEXT_PUBLIC_VIETQR_* cũ không còn được đọc. Nếu đổi tài khoản nhận tiền, cập nhật tài khoản theo dõi của SePay/PayOS nếu đang dùng, rồi tải lại trang đặt mang về.
+
+Bàn chỉ cần nhập số; không phải tạo hoặc chọn khu vực. Nhân viên mở bàn nào thì phụ trách bàn đó.
 
 ## 7. Thử một đơn để xác nhận app chạy được
 
 1. Staff mở `/staff` → **Kiểm tra chuông → Mở bàn & Tạo QR**.
 2. Điện thoại khách quét QR, gọi một món bếp và một đồ uống.
-3. Kitchen mở `/kitchen` → **Kiểm tra chuông** → thấy món mới → **Nhận nấu → Hoàn thành**.
+3. Kitchen mở `/kitchen` → **Kiểm tra chuông** → thấy món mới → **Xong món**.
 4. Staff nhận cảnh báo món chín và chuông → xác nhận đã phục vụ.
 5. Khách gọi tính tiền; staff phụ trách hoặc Chủ quán chốt bill.
 6. Quét lại QR cũ: phải báo phiên đã đóng.

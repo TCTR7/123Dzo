@@ -41,27 +41,27 @@ const LOG_TYPE_CONFIG: Record<
 > = {
   IMPORT: {
     label: 'Nhập kho (+)',
-    badgeClass: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-500/30',
     isAddition: true,
     description: 'Nhập thêm bia, nguyên liệu tươi sống vào kho',
   },
   RETURN_BEER: {
     label: 'Khách trả bia (+)',
-    badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+    badgeClass: 'bg-sky-500/15 text-sky-800 border-sky-500/30',
     isAddition: true,
     description: 'Hoàn trả số lon bia khách không uống hết về lại kho',
   },
   EXPORT_SALE: {
     label: 'Xuất bán (-)',
-    badgeClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    badgeClass: 'bg-amber-500/15 text-amber-800 border-amber-500/30',
     isAddition: false,
     description: 'Xuất nguyên liệu / đồ uống phục vụ bán hàng',
   },
   WASTAGE: {
     label: 'Xuất hủy hỏng (-)',
-    badgeClass: 'bg-red-500/15 text-red-400 border-red-500/30',
+    badgeClass: 'bg-red-500/15 text-red-800 border-red-500/30',
     isAddition: false,
-    description: 'Hủy nguyên liệu hư hỏng, đổ vỡ (tính vào Chi phí hao hụt KPI)',
+    description: 'Ghi lại hàng hỏng, đổ vỡ và số tiền hao hụt',
   },
 };
 
@@ -389,10 +389,10 @@ export function InventoryManager({
       {/* Header & Nút thao tác nhanh */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-100">
+          <h2 className="text-2xl font-bold text-ink">
             Quản lý Kho Nguyên liệu & Bia
           </h2>
-          <p className="text-sm text-zinc-400 mt-1">
+          <p className="text-sm text-muted-ink mt-1">
             Theo dõi định mức tồn kho thực tế, lập phiếu Nhập hàng, Xuất bán, Trả bia thừa và Hủy hàng hỏng.
           </p>
         </div>
@@ -401,7 +401,7 @@ export function InventoryManager({
           <button
             type="button"
             onClick={() => openInventoryLogModal(undefined, 'IMPORT')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-medium text-sm transition-colors"
           >
             <ArrowDownCircle className="h-4 w-4" />
             Lập phiếu Nhập / Xuất kho
@@ -409,7 +409,7 @@ export function InventoryManager({
           <button
             type="button"
             onClick={openCreateIngredientModal}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-ink font-semibold text-sm transition-colors"
           >
             <Plus className="h-4 w-4" />
             Thêm nguyên liệu mới
@@ -419,11 +419,11 @@ export function InventoryManager({
 
       {/* 4 Thẻ thống kê nhanh */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
-          <div className="text-xs font-medium text-zinc-400">
+        <div className="p-4 rounded-xl bg-surface border border-line">
+          <div className="text-xs font-medium text-muted-ink">
             Tổng mặt hàng kho
           </div>
-          <div className="text-2xl font-bold text-zinc-100 mt-1">
+          <div className="text-2xl font-bold text-ink mt-1">
             {ingredients.length} mặt hàng
           </div>
         </div>
@@ -432,32 +432,32 @@ export function InventoryManager({
           className={cn(
             'p-4 rounded-xl border transition-colors',
             lowStockCount > 0
-              ? 'bg-red-950/40 border-red-500/50'
-              : 'bg-zinc-900 border-zinc-800'
+              ? 'bg-red-50/40 border-red-500/50'
+              : 'bg-surface border-line'
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-red-300">
+            <span className="text-xs font-medium text-red-800">
               Cảnh báo dưới mức tối thiểu
             </span>
-            <AlertTriangle className="h-4 w-4 text-red-400" />
+            <AlertTriangle className="h-4 w-4 text-red-800" />
           </div>
-          <div className="text-2xl font-bold text-red-400 mt-1">
+          <div className="text-2xl font-bold text-red-800 mt-1">
             {lowStockCount} mặt hàng
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
-          <div className="text-xs font-medium text-zinc-400">
+        <div className="p-4 rounded-xl bg-surface border border-line">
+          <div className="text-xs font-medium text-muted-ink">
             Tổng giá trị tồn kho ước tính
           </div>
-          <div className="text-2xl font-bold text-amber-400 mt-1">
+          <div className="text-2xl font-bold text-amber-800 mt-1">
             {formatVND(totalInventoryValue)}
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
-          <div className="text-xs font-medium text-zinc-400">
+        <div className="p-4 rounded-xl bg-surface border border-line">
+          <div className="text-xs font-medium text-muted-ink">
             Chi phí hao hụt kho (WASTAGE)
           </div>
           <div className="text-2xl font-bold text-rose-400 mt-1">
@@ -467,12 +467,12 @@ export function InventoryManager({
       </div>
 
       {errorMessage && (
-        <div className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="p-3.5 rounded-lg bg-red-50/60 border border-red-500/50 text-red-800 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
             onClick={() => setErrorMessage(null)}
-            className="text-red-300 hover:text-white"
+            className="text-red-800 hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -480,15 +480,15 @@ export function InventoryManager({
       )}
 
       {/* Bộ lọc & Tìm kiếm nguyên liệu */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-900/70 p-3.5 rounded-xl border border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface/70 p-3.5 rounded-xl border border-line">
         <div className="relative flex-1 max-w-md">
-          <Search className="h-4 w-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="h-4 w-4 text-muted-ink absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm theo tên nguyên liệu, bia, đơn vị (lon, két, kg)..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+            className="w-full pl-9 pr-4 py-2 rounded-lg bg-soft border border-line text-sm text-ink placeholder:text-muted-ink focus:outline-none focus:border-amber-500"
           />
         </div>
 
@@ -498,21 +498,21 @@ export function InventoryManager({
           className={cn(
             'inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors',
             onlyLowStock
-              ? 'bg-red-500/20 border-red-500 text-red-300'
-              : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+              ? 'bg-red-500/20 border-red-500 text-red-800'
+              : 'bg-soft border-line text-ink hover:border-line'
           )}
         >
-          <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+          <AlertTriangle className="h-3.5 w-3.5 text-red-800" />
           Chỉ hiện hàng sắp hết ({lowStockCount})
         </button>
       </div>
 
       {/* Bảng Danh sách Nguyên liệu (ingredients) */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+      <div className="bg-surface border border-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-zinc-800 text-xs uppercase text-zinc-400 bg-zinc-950/50">
+              <tr className="border-b border-line text-xs uppercase text-muted-ink bg-soft/50">
                 <th className="py-3.5 px-4">Tên nguyên liệu / Bia</th>
                 <th className="py-3.5 px-4">Đơn vị</th>
                 <th className="py-3.5 px-4 text-right">Tồn kho hiện tại</th>
@@ -522,12 +522,12 @@ export function InventoryManager({
                 <th className="py-3.5 px-4 text-right">Thao tác nhanh</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/80 text-sm">
+            <tbody className="divide-y divide-line/80 text-sm">
               {filteredIngredients.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
-                    className="py-10 text-center text-zinc-500"
+                    className="py-10 text-center text-muted-ink"
                   >
                     Không có nguyên liệu nào khớp với bộ lọc.
                   </td>
@@ -541,44 +541,44 @@ export function InventoryManager({
                       className={cn(
                         'transition-colors',
                         isLowStock
-                          ? 'bg-red-950/30 hover:bg-red-950/45'
-                          : 'hover:bg-zinc-800/40'
+                          ? 'bg-red-50/30 hover:bg-red-50/45'
+                          : 'hover:bg-muted/40'
                       )}
                     >
-                      <td className="py-3.5 px-4 font-semibold text-zinc-100">
+                      <td className="py-3.5 px-4 font-semibold text-ink">
                         <div className="flex items-center gap-2">
                           <Package
                             className={cn(
                               'h-4 w-4 shrink-0',
-                              isLowStock ? 'text-red-400' : 'text-amber-400'
+                              isLowStock ? 'text-red-800' : 'text-amber-800'
                             )}
                           />
                           <span>{item.name}</span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-zinc-300">{item.unit}</td>
+                      <td className="py-3.5 px-4 text-ink">{item.unit}</td>
                       <td
                         className={cn(
                           'py-3.5 px-4 text-right font-bold',
-                          isLowStock ? 'text-red-400' : 'text-emerald-400'
+                          isLowStock ? 'text-red-800' : 'text-emerald-800'
                         )}
                       >
                         {item.stock_quantity.toLocaleString('vi-VN')} {item.unit}
                       </td>
-                      <td className="py-3.5 px-4 text-right text-zinc-400">
+                      <td className="py-3.5 px-4 text-right text-muted-ink">
                         {item.min_threshold.toLocaleString('vi-VN')} {item.unit}
                       </td>
-                      <td className="py-3.5 px-4 text-right text-zinc-200">
+                      <td className="py-3.5 px-4 text-right text-ink">
                         {formatVND(item.unit_cost)}
                       </td>
                       <td className="py-3.5 px-4">
                         {isLowStock ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-300 border border-red-500/40">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-800 border border-red-500/40">
                             <AlertTriangle className="h-3.5 w-3.5" />
                             Sắp hết hàng
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-800 border border-emerald-500/30">
                             Đủ định mức
                           </span>
                         )}
@@ -591,7 +591,7 @@ export function InventoryManager({
                               openInventoryLogModal(item, 'IMPORT')
                             }
                             title="Nhập thêm hàng"
-                            className="px-2.5 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-medium border border-emerald-500/30"
+                            className="px-2.5 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-800/25 text-emerald-800 text-xs font-medium border border-emerald-500/30"
                           >
                             + Nhập
                           </button>
@@ -601,7 +601,7 @@ export function InventoryManager({
                               openInventoryLogModal(item, 'EXPORT_SALE')
                             }
                             title="Xuất kho"
-                            className="px-2.5 py-1.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-medium border border-amber-500/30"
+                            className="px-2.5 py-1.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 text-xs font-medium border border-amber-500/30"
                           >
                             - Xuất
                           </button>
@@ -611,7 +611,7 @@ export function InventoryManager({
                               openInventoryLogModal(item, 'WASTAGE')
                             }
                             title="Xuất hủy hàng hỏng"
-                            className="px-2.5 py-1.5 rounded-md bg-red-500/15 hover:bg-red-500/25 text-red-300 text-xs font-medium border border-red-500/30"
+                            className="px-2.5 py-1.5 rounded-md bg-red-500/15 hover:bg-red-500/25 text-red-800 text-xs font-medium border border-red-500/30"
                           >
                             Hủy
                           </button>
@@ -619,7 +619,7 @@ export function InventoryManager({
                             type="button"
                             onClick={() => openEditIngredientModal(item)}
                             title="Chỉnh sửa định mức"
-                            className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                            className="p-1.5 rounded-md bg-muted hover:bg-stone-200 text-ink"
                           >
                             <Edit3 className="h-3.5 w-3.5" />
                           </button>
@@ -635,11 +635,11 @@ export function InventoryManager({
       </div>
 
       {/* Bảng Lịch sử Xuất / Nhập / Hủy kho (inventory_logs) */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+      <div className="bg-surface border border-line rounded-xl p-4 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <History className="h-5 w-5 text-amber-400" />
-            <h3 className="font-bold text-lg text-zinc-100">
+            <History className="h-5 w-5 text-amber-800" />
+            <h3 className="font-bold text-lg text-ink">
               Lịch sử Xuất / Nhập / Hủy kho gần đây
             </h3>
           </div>
@@ -655,8 +655,8 @@ export function InventoryManager({
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                   logFilterType === typeKey
-                    ? 'bg-amber-500 text-zinc-950 border-amber-500 font-semibold'
-                    : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                    ? 'bg-amber-500 text-ink border-amber-500 font-semibold'
+                    : 'bg-soft text-muted-ink border-line hover:text-ink'
                 )}
               >
                 {typeKey === 'ALL'
@@ -670,7 +670,7 @@ export function InventoryManager({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-zinc-800 text-xs uppercase text-zinc-400">
+              <tr className="border-b border-line text-xs uppercase text-muted-ink">
                 <th className="py-3 px-3">Thời gian</th>
                 <th className="py-3 px-3">Loại phiếu</th>
                 <th className="py-3 px-3">Nguyên liệu</th>
@@ -680,10 +680,10 @@ export function InventoryManager({
                 <th className="py-3 px-3">Người tạo</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/60 text-sm">
+            <tbody className="divide-y divide-line/60 text-sm">
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-zinc-500">
+                  <td colSpan={7} className="py-8 text-center text-muted-ink">
                     Chưa có lịch sử phiếu kho nào.
                   </td>
                 </tr>
@@ -692,8 +692,8 @@ export function InventoryManager({
                   const ing = ingredientById.get(log.ingredient_id);
                   const cfg = LOG_TYPE_CONFIG[log.type];
                   return (
-                    <tr key={log.id} className="hover:bg-zinc-800/30">
-                      <td className="py-3 px-3 text-xs text-zinc-400 whitespace-nowrap">
+                    <tr key={log.id} className="hover:bg-muted/30">
+                      <td className="py-3 px-3 text-xs text-muted-ink whitespace-nowrap">
                         {new Date(log.created_at).toLocaleString('vi-VN')}
                       </td>
                       <td className="py-3 px-3">
@@ -706,15 +706,15 @@ export function InventoryManager({
                           {cfg.label}
                         </span>
                       </td>
-                      <td className="py-3 px-3 font-medium text-zinc-200">
+                      <td className="py-3 px-3 font-medium text-ink">
                         {ing?.name ?? 'Nguyên liệu đã xóa'}
                       </td>
                       <td
                         className={cn(
                           'py-3 px-3 text-right font-bold',
                           log.quantity_change >= 0
-                            ? 'text-emerald-400'
-                            : 'text-red-400'
+                            ? 'text-emerald-800'
+                            : 'text-red-800'
                         )}
                       >
                         {log.quantity_change > 0
@@ -722,16 +722,16 @@ export function InventoryManager({
                           : log.quantity_change}{' '}
                         {ing?.unit ?? ''}
                       </td>
-                      <td className="py-3 px-3 text-right text-zinc-200">
+                      <td className="py-3 px-3 text-right text-ink">
                         {formatVND(log.total_cost)}
                       </td>
-                      <td className="py-3 px-3 text-zinc-400">
+                      <td className="py-3 px-3 text-muted-ink">
                         {log.note ?? '—'}
                       </td>
-                      <td className="py-3 px-3 text-xs text-zinc-400">
+                      <td className="py-3 px-3 text-xs text-muted-ink">
                         {log.created_by
                           ? staffNameById.get(log.created_by) ?? log.created_by
-                          : 'Hệ thống / Admin'}
+                          : 'Quán'}
                       </td>
                     </tr>
                   );
@@ -744,10 +744,10 @@ export function InventoryManager({
 
       {/* Modal 1: Thêm / Chỉnh sửa Nguyên liệu (ingredients) */}
       {isIngredientModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 {editingIngredient
                   ? 'Chỉnh sửa Nguyên liệu'
                   : 'Thêm Nguyên liệu / Bia mới'}
@@ -755,7 +755,7 @@ export function InventoryManager({
               <button
                 type="button"
                 onClick={() => setIsIngredientModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-100"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -763,7 +763,7 @@ export function InventoryManager({
 
             <form onSubmit={handleSaveIngredient} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                <label className="block text-xs font-medium text-ink mb-1">
                   Tên nguyên liệu / Bia *
                 </label>
                 <input
@@ -772,13 +772,13 @@ export function InventoryManager({
                   value={ingName}
                   onChange={(e) => setIngName(e.target.value)}
                   placeholder="VD: Bia Tiger Crystal, Ếch đồng tươi..."
-                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Đơn vị tính *
                   </label>
                   <input
@@ -787,11 +787,11 @@ export function InventoryManager({
                     value={ingUnit}
                     onChange={(e) => setIngUnit(e.target.value)}
                     placeholder="lon, chai, kg, phần..."
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Giá vốn / 1 đơn vị (VNĐ) *
                   </label>
                   <input
@@ -801,14 +801,14 @@ export function InventoryManager({
                     required
                     value={ingUnitCost}
                     onChange={(e) => setIngUnitCost(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Số lượng tồn ban đầu
                   </label>
                   <input
@@ -817,11 +817,11 @@ export function InventoryManager({
                     required
                     value={ingStock}
                     onChange={(e) => setIngStock(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Mức cảnh báo tối thiểu *
                   </label>
                   <input
@@ -831,23 +831,23 @@ export function InventoryManager({
                     required
                     value={ingMinThreshold}
                     onChange={(e) => setIngMinThreshold(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsIngredientModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
+                  className="px-4 py-2 rounded-lg bg-muted text-ink text-sm font-medium"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-semibold"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-ink text-sm font-semibold"
                 >
                   {isSubmitting ? 'Đang lưu...' : 'Lưu nguyên liệu'}
                 </button>
@@ -859,16 +859,16 @@ export function InventoryManager({
 
       {/* Modal 2: Lập phiếu Nhập / Xuất / Trả bia / Hủy kho (inventory_logs) */}
       {isLogModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 Lập phiếu Nhập / Xuất / Hủy kho
               </h3>
               <button
                 type="button"
                 onClick={() => setIsLogModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-100"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -876,7 +876,7 @@ export function InventoryManager({
 
             <form onSubmit={handleCreateInventoryLog} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                <label className="block text-xs font-medium text-ink mb-1.5">
                   Loại giao dịch kho *
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -911,7 +911,7 @@ export function InventoryManager({
                           'flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs font-medium transition-all',
                           active
                             ? cfg.badgeClass + ' ring-1 ring-current'
-                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                            : 'bg-soft border-line text-muted-ink hover:text-ink'
                         )}
                       >
                         <Icon className="h-4 w-4 shrink-0" />
@@ -920,13 +920,13 @@ export function InventoryManager({
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-zinc-400 mt-1.5">
+                <p className="text-[11px] text-muted-ink mt-1.5">
                   {LOG_TYPE_CONFIG[logType].description}
                 </p>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                <label className="block text-xs font-medium text-ink mb-1">
                   Chọn nguyên liệu / Bia *
                 </label>
                 <select
@@ -939,7 +939,7 @@ export function InventoryManager({
                       setLogUnitCost(String(ing.unit_cost));
                     }
                   }}
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-soft border border-line text-sm text-ink"
                 >
                   {ingredients.map((item) => (
                     <option key={item.id} value={item.id}>
@@ -951,7 +951,7 @@ export function InventoryManager({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Số lượng ({ingredientById.get(selectedIngredientId)?.unit ?? 'đơn vị'}) *
                   </label>
                   <input
@@ -961,11 +961,11 @@ export function InventoryManager({
                     required
                     value={logQuantity}
                     onChange={(e) => setLogQuantity(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  <label className="block text-xs font-medium text-ink mb-1">
                     Đơn giá vốn (VNĐ) *
                   </label>
                   <input
@@ -975,14 +975,14 @@ export function InventoryManager({
                     required
                     value={logUnitCost}
                     onChange={(e) => setLogUnitCost(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
               </div>
 
-              <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-between text-xs">
-                <span className="text-zinc-400">Tổng giá trị phiếu:</span>
-                <span className="font-bold text-sm text-amber-400">
+              <div className="p-3 rounded-lg bg-soft border border-line flex items-center justify-between text-xs">
+                <span className="text-muted-ink">Tổng giá trị phiếu:</span>
+                <span className="font-bold text-sm text-amber-800">
                   {formatVND(
                     Math.max(0, Number(logQuantity) || 0) *
                       Math.max(0, Number(logUnitCost) || 0)
@@ -991,7 +991,7 @@ export function InventoryManager({
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                <label className="block text-xs font-medium text-ink mb-1">
                   Ghi chú phiếu kho
                 </label>
                 <input
@@ -999,22 +999,22 @@ export function InventoryManager({
                   value={logNote}
                   onChange={(e) => setLogNote(e.target.value)}
                   placeholder="VD: Nhập 10 két Tiger từ đại lý Hải Sơn..."
-                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsLogModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium"
+                  className="px-4 py-2 rounded-lg bg-muted text-ink text-sm font-medium"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold"
+                  className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-semibold"
                 >
                   {isSubmitting ? 'Đang xử lý...' : 'Xác nhận & Cập nhật tồn kho'}
                 </button>

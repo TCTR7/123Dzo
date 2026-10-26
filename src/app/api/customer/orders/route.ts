@@ -1,3 +1,4 @@
+import { readPaymentSettings } from '@/lib/payments/settings';
 import { NextResponse } from 'next/server';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/server';
 import { addOrderItems, parseCart } from '@/lib/services/orders';
@@ -17,13 +18,16 @@ export async function POST(req: Request) {
     const name = typeof body.customerName === 'string' ? body.customerName.trim() : '';
     const phone = typeof body.customerPhone === 'string' ? body.customerPhone.replace(/\s/g, '') : '';
     assertAllowed(name.length > 0 && name.length <= 100 && /^\d{9,12}$/.test(phone), 'Tên hoặc số điện thoại không hợp lệ.', 400);
+    let paymentSettings;
+    try { paymentSettings = await readPaymentSettings(); } catch { throw new ApiError('Quán chưa nhận đặt mang về lúc này. Vui lòng thử lại sau.', 503); }
+    assertAllowed(paymentSettings, 'Quán chưa thiết lập nhận tiền cho đơn mang về.', 503);
     const db = createSupabaseServiceRoleClient();
     const created = await db.from('table_sessions').insert({ session_type: 'TAKEAWAY', status: 'PENDING_PAYMENT', session_token: crypto.randomUUID(), payment_code: `DZO${crypto.randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase()}`, customer_name: name, customer_phone: phone, payment_method: 'VIETQR', total_amount: 0 }).select('*').single();
     if (created.error || !created.data) throw new ApiError('Không tạo được đơn mang về.', 502);
     try {
       const orders = await addOrderItems(created.data, cart, true);
       const latest = await sessionByToken(created.data.session_token);
-      return NextResponse.json({ session: publicSession(latest), orders: orders.map(publicOrder) }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ session: publicSession(latest), orders: orders.map(publicOrder), paymentSettings }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) {
       await db.from('table_sessions').delete().eq('id', created.data.id).eq('status', 'PENDING_PAYMENT');
       throw error;

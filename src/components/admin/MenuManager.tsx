@@ -35,20 +35,20 @@ const CATEGORY_LABELS: Record<
   { label: string; badgeClass: string }
 > = {
   FOOD: {
-    label: 'Mồi nhậu (FOOD)',
-    badgeClass: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    label: 'Mồi nhậu',
+    badgeClass: 'bg-orange-500/15 text-orange-800 border-orange-500/30',
   },
   BEER: {
-    label: 'Bia (BEER)',
-    badgeClass: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    label: 'Bia',
+    badgeClass: 'bg-amber-500/15 text-amber-800 border-amber-500/30',
   },
   DRINK: {
-    label: 'Nước ngọt / Đồ uống (DRINK)',
-    badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+    label: 'Nước ngọt / Đồ uống',
+    badgeClass: 'bg-sky-500/15 text-sky-800 border-sky-500/30',
   },
   OTHER: {
-    label: 'Khác / Khăn lạnh (OTHER)',
-    badgeClass: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
+    label: 'Khác / Khăn lạnh',
+    badgeClass: 'bg-zinc-500/15 text-ink border-zinc-500/30',
   },
 };
 
@@ -57,15 +57,15 @@ const STATION_LABELS: Record<
   { label: string; description: string; badgeClass: string }
 > = {
   KITCHEN: {
-    label: 'Bếp chế biến (KITCHEN)',
-    description: 'Đẩy vào màn hình KDS Bếp (QUEUED -> COOKING -> READY)',
-    badgeClass: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+    label: 'Cần bếp làm',
+    description: 'Món hiện trong hàng đợi bếp. Làm xong, bếp báo nhân viên mang ra.',
+    badgeClass: 'bg-orange-500/15 text-orange-800 border-orange-500/30',
   },
   BAR_INSTANT: {
-    label: 'Quầy / Lấy ngay (BAR_INSTANT)',
+    label: 'Lấy mang ra ngay',
     description:
-      'Không qua Bếp, set thẳng READY và báo Nhân viên chạy bàn mang ra ngay',
-    badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+      'Bia, nước, khăn lạnh: báo nhân viên lấy mang ra ngay, không phải chờ bếp.',
+    badgeClass: 'bg-emerald-500/15 text-emerald-800 border-emerald-500/30',
   },
 };
 
@@ -97,7 +97,6 @@ export function MenuManager({
   const [station, setStation] = useState<StationType>('KITCHEN');
   const [price, setPrice] = useState<string>('69000');
   const [costPrice, setCostPrice] = useState<string>('30000');
-  const [prepTimeMinutes, setPrepTimeMinutes] = useState<string>('10');
   const [imageUrl, setImageUrl] = useState<string>('');
   const [isAvailable, setIsAvailable] = useState<boolean>(true);
   const [linkedIngredientId, setLinkedIngredientId] = useState<string>('');
@@ -132,7 +131,7 @@ export function MenuManager({
     setStation('KITCHEN');
     setPrice('79000');
     setCostPrice('35000');
-    setPrepTimeMinutes('12');
+
     setImageUrl('');
     setIsAvailable(true);
     setLinkedIngredientId('');
@@ -148,7 +147,7 @@ export function MenuManager({
     setStation(item.station);
     setPrice(String(item.price));
     setCostPrice(String(item.cost_price));
-    setPrepTimeMinutes(String(item.prep_time_minutes));
+
     setImageUrl(item.image_url ?? '');
     setIsAvailable(item.is_available);
     setLinkedIngredientId(item.linked_ingredient_id ?? '');
@@ -196,7 +195,7 @@ export function MenuManager({
 
       if (uploadError) {
         throw new Error(
-          `Lỗi tải ảnh lên Supabase Storage (${MENU_STORAGE_BUCKET}): ${uploadError.message}`
+          `Chưa tải được ảnh. Vui lòng thử lại.`
         );
       }
 
@@ -206,7 +205,7 @@ export function MenuManager({
 
       setImageUrl(publicUrlData.publicUrl);
       setCompressionInfo(
-        `Đã nén chuẩn WebP: ${originalKb}KB → ${compressedKb}KB (< 80KB)`
+        `Đã tải ảnh món ăn.`
       );
     } catch (err) {
       setErrorMessage(
@@ -218,7 +217,7 @@ export function MenuManager({
   }
 
   /**
-   * Nút gạt "Tạm hết hàng (86ing)" cập nhật tức thì cột is_available trên bảng menu_items
+   * Nút gạt "Tạm hết hàng" cập nhật tức thì cột is_available trên bảng menu_items
    */
   async function handleToggleAvailability(item: MenuItemRow) {
     if (togglingId === item.id) return;
@@ -237,7 +236,7 @@ export function MenuManager({
 
       if (error || !data) {
         throw new Error(
-          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng (86ing)'
+          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng'
         );
       }
 
@@ -260,7 +259,6 @@ export function MenuManager({
     const trimmedName = name.trim();
     const parsedPrice = Number(price);
     const parsedCostPrice = Number(costPrice);
-    const parsedPrepTime = Number(prepTimeMinutes);
 
     if (!trimmedName) {
       setErrorMessage('Tên món ăn không được để trống.');
@@ -271,11 +269,9 @@ export function MenuManager({
       Number.isNaN(parsedPrice) ||
       parsedPrice < 0 ||
       Number.isNaN(parsedCostPrice) ||
-      parsedCostPrice < 0 ||
-      Number.isNaN(parsedPrepTime) ||
-      parsedPrepTime < 0
+      parsedCostPrice < 0
     ) {
-      setErrorMessage('Giá bán, giá vốn và thời gian nấu chuẩn phải hợp lệ.');
+      setErrorMessage('Giá bán và tiền vốn phải là số từ 0 trở lên.');
       return;
     }
 
@@ -289,7 +285,7 @@ export function MenuManager({
         station,
         price: parsedPrice,
         cost_price: parsedCostPrice,
-        prep_time_minutes: Math.round(parsedPrepTime),
+        prep_time_minutes: editingItem?.prep_time_minutes ?? 0,
         image_url: imageUrl.trim() || null,
         is_available: isAvailable,
         linked_ingredient_id: linkedIngredientId || null,
@@ -364,18 +360,18 @@ export function MenuManager({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-100">
-            Quản lý Thực đơn & Báo hết món nhanh (86ing)
+          <h2 className="text-2xl font-bold text-ink">
+            Thực đơn
           </h2>
-          <p className="text-sm text-zinc-400 mt-1">
-            Thiết lập giá bán (`price`), giá vốn (`cost_price`), thời gian nấu chuẩn (`prep_time_minutes`), phân trạm (`KITCHEN` / `BAR_INSTANT`) và nén ảnh WebP &lt; 80KB.
+          <p className="text-sm text-muted-ink mt-1">
+            Thêm món ngon, cập nhật giá và báo hết món để khách biết ngay.
           </p>
         </div>
 
         <button
           type="button"
           onClick={openCreateModal}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-ink font-semibold text-sm transition-colors"
         >
           <Plus className="h-4 w-4" />
           Thêm món mới
@@ -383,12 +379,12 @@ export function MenuManager({
       </div>
 
       {errorMessage && (
-        <div className="p-3.5 rounded-lg bg-red-950/60 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="p-3.5 rounded-lg bg-red-50/60 border border-red-500/50 text-red-800 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
             onClick={() => setErrorMessage(null)}
-            className="text-red-300 hover:text-white"
+            className="text-red-800 hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -396,15 +392,15 @@ export function MenuManager({
       )}
 
       {/* Thanh Tìm kiếm & Bộ lọc Danh mục / Trạm xử lý */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="bg-surface border border-line rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
-          <Search className="h-4 w-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="h-4 w-4 text-muted-ink absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm món ăn, mồi nhậu, bia..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+            className="w-full pl-9 pr-4 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
           />
         </div>
 
@@ -417,8 +413,8 @@ export function MenuManager({
               className={cn(
                 'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                 categoryFilter === cat
-                  ? 'bg-amber-500 text-zinc-950 border-amber-500 font-semibold'
-                  : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                  ? 'bg-amber-500 text-ink border-amber-500 font-semibold'
+                  : 'bg-soft text-muted-ink border-line hover:text-ink'
               )}
             >
               {cat === 'ALL' ? 'Tất cả danh mục' : CATEGORY_LABELS[cat].label}
@@ -430,11 +426,11 @@ export function MenuManager({
             onChange={(e) =>
               setStationFilter(e.target.value as StationType | 'ALL')
             }
-            className="px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200"
+            className="px-3 py-1.5 rounded-lg bg-soft border border-line text-xs text-ink"
           >
-            <option value="ALL">Tất cả trạm (KITCHEN & BAR_INSTANT)</option>
-            <option value="KITCHEN">Trạm Bếp (KITCHEN)</option>
-            <option value="BAR_INSTANT">Quầy lấy ngay (BAR_INSTANT)</option>
+            <option value="ALL">Tất cả cách phục vụ</option>
+            <option value="KITCHEN">Cần bếp làm</option>
+            <option value="BAR_INSTANT">Lấy mang ra ngay</option>
           </select>
         </div>
       </div>
@@ -442,7 +438,7 @@ export function MenuManager({
       {/* Lưới hiển thị món ăn */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filteredItems.length === 0 ? (
-          <div className="col-span-full py-12 text-center bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500">
+          <div className="col-span-full py-12 text-center bg-surface border border-line rounded-xl text-muted-ink">
             Chưa có món ăn nào khớp với bộ lọc.
           </div>
         ) : (
@@ -460,13 +456,13 @@ export function MenuManager({
                 className={cn(
                   'rounded-xl border p-4 flex flex-col justify-between gap-4 transition-all',
                   item.is_available
-                    ? 'bg-zinc-900 border-zinc-800'
-                    : 'bg-zinc-900/50 border-red-500/40 opacity-80'
+                    ? 'bg-surface border-line'
+                    : 'bg-surface/50 border-red-500/40 opacity-80'
                 )}
               >
                 <div className="flex gap-3.5">
                   {/* Ảnh món ăn (WebP) */}
-                  <div className="h-20 w-20 rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
+                  <div className="h-20 w-20 rounded-xl bg-soft border border-line overflow-hidden shrink-0 flex items-center justify-center">
                     {item.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -475,20 +471,20 @@ export function MenuManager({
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <UtensilsCrossed className="h-7 w-7 text-zinc-700" />
+                      <UtensilsCrossed className="h-7 w-7 text-ink" />
                     )}
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-bold text-base text-zinc-100 truncate">
+                      <h3 className="font-bold text-base text-ink truncate">
                         {item.name}
                       </h3>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() => openEditModal(item)}
-                          className="p-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                          className="p-1.5 rounded-md bg-muted hover:bg-stone-200 text-ink"
                           title="Chỉnh sửa món"
                         >
                           <Edit3 className="h-3.5 w-3.5" />
@@ -496,7 +492,7 @@ export function MenuManager({
                         <button
                           type="button"
                           onClick={() => handleDeleteMenuItem(item.id)}
-                          className="p-1.5 rounded-md bg-zinc-800 hover:bg-red-950 text-zinc-400 hover:text-red-400"
+                          className="p-1.5 rounded-md bg-muted hover:bg-red-50 text-muted-ink hover:text-red-800"
                           title="Xóa món"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -524,26 +520,26 @@ export function MenuManager({
                         ) : (
                           <Beer className="h-3 w-3" />
                         )}
-                        {item.station}
+                        {stCfg.label}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
                       <div>
-                        <span className="text-zinc-500 block">Giá bán</span>
-                        <span className="font-bold text-amber-400">
+                        <span className="text-muted-ink block">Giá bán</span>
+                        <span className="font-bold text-amber-800">
                           {formatVND(item.price)}
                         </span>
                       </div>
                       <div>
-                        <span className="text-zinc-500 block">Giá vốn</span>
-                        <span className="font-medium text-zinc-300">
+                        <span className="text-muted-ink block">Giá vốn</span>
+                        <span className="font-medium text-ink">
                           {formatVND(item.cost_price)}
                         </span>
                       </div>
                       <div>
-                        <span className="text-zinc-500 block">Lãi gộp</span>
-                        <span className="font-semibold text-emerald-400">
+                        <span className="text-muted-ink block">Lãi gộp</span>
+                        <span className="font-semibold text-emerald-800">
                           +{formatVND(grossMargin)}
                         </span>
                       </div>
@@ -552,14 +548,10 @@ export function MenuManager({
                 </div>
 
                 {/* Footer thẻ món: Thời gian nấu chuẩn, liên kết kho & Nút gạt 86ing */}
-                <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-2">
-                  <div className="flex flex-col gap-1 text-xs text-zinc-400">
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5 text-zinc-500" />
-                      Chuẩn nấu: <strong>{item.prep_time_minutes} phút</strong>
-                    </span>
+                <div className="pt-3 border-t border-line/80 flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-1 text-xs text-muted-ink">
                     {linkedIng && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-sky-400">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-sky-800">
                         <Link2 className="h-3 w-3" />
                         Trừ kho: {linkedIng.name} ({linkedIng.stock_quantity}{' '}
                         {linkedIng.unit})
@@ -567,7 +559,7 @@ export function MenuManager({
                     )}
                   </div>
 
-                  {/* Nút gạt Tạm hết hàng (86ing) */}
+                  {/* Nút gạt Tạm hết hàng */}
                   <button
                     type="button"
                     disabled={togglingId === item.id}
@@ -575,19 +567,19 @@ export function MenuManager({
                     className={cn(
                       'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
                       item.is_available
-                        ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
-                        : 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/40'
+                        ? 'bg-emerald-500/15 hover:bg-emerald-800/25 text-emerald-800 border-emerald-500/30'
+                        : 'bg-red-500/20 hover:bg-red-500/30 text-red-800 border-red-500/40'
                     )}
                   >
                     {item.is_available ? (
                       <>
                         <CheckCircle2 className="h-3.5 w-3.5" />
-                        Đang bán (Bấm để 86)
+                        Đang bán · Bấm báo hết
                       </>
                     ) : (
                       <>
                         <Ban className="h-3.5 w-3.5" />
-                        Tạm hết hàng (86ing)
+                        Tạm hết hàng
                       </>
                     )}
                   </button>
@@ -600,16 +592,16 @@ export function MenuManager({
 
       {/* Modal Thêm / Chỉnh sửa Món ăn */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-xl w-full p-6 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-surface border border-line rounded-2xl max-w-xl w-full p-6 space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
                 {editingItem ? 'Chỉnh sửa Món ăn' : 'Thêm Món ăn mới vào Thực đơn'}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-zinc-400 hover:text-zinc-100"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -617,7 +609,7 @@ export function MenuManager({
 
             <form onSubmit={handleSaveMenuItem} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                <label className="block text-xs font-medium text-ink mb-1">
                   Tên món ăn / Đồ uống *
                 </label>
                 <input
@@ -626,14 +618,14 @@ export function MenuManager({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="VD: Ếch xào sả ớt, Bia Tiger Bạc, Khăn lạnh..."
-                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Danh mục (category) *
+                  <label className="block text-xs font-medium text-ink mb-1">
+                    Nhóm món *
                   </label>
                   <select
                     value={category}
@@ -642,45 +634,45 @@ export function MenuManager({
                       setCategory(nextCat);
                       if (nextCat === 'BEER' || nextCat === 'DRINK') {
                         setStation('BAR_INSTANT');
-                        setPrepTimeMinutes('0');
-                      } else if (nextCat === 'FOOD') {
+
+                      } else if (nextCat === 'OTHER') { setStation('BAR_INSTANT'); } else if (nextCat === 'FOOD') {
                         setStation('KITCHEN');
                       }
                     }}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   >
-                    <option value="FOOD">Mồi nhậu (FOOD)</option>
-                    <option value="BEER">Bia (BEER)</option>
-                    <option value="DRINK">Nước ngọt / Đồ uống (DRINK)</option>
-                    <option value="OTHER">Khác / Khăn lạnh (OTHER)</option>
+                    <option value="FOOD">Mồi nhậu</option>
+                    <option value="BEER">Bia</option>
+                    <option value="DRINK">Nước ngọt / Đồ uống</option>
+                    <option value="OTHER">Khác / Khăn lạnh</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Trạm xử lý (station) *
+                  <label className="block text-xs font-medium text-ink mb-1">
+                    Cách phục vụ *
                   </label>
                   <select
                     value={station}
                     onChange={(e) => setStation(e.target.value as StationType)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   >
-                    <option value="KITCHEN">Bếp chế biến (KITCHEN)</option>
+                    <option value="KITCHEN">Cần bếp làm</option>
                     <option value="BAR_INSTANT">
-                      Quầy lấy ngay (BAR_INSTANT)
+                      Lấy mang ra ngay
                     </option>
                   </select>
                 </div>
               </div>
 
-              <p className="text-[11px] text-zinc-400 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800">
+              <p className="text-[11px] text-muted-ink bg-soft p-2.5 rounded-lg border border-line">
                 {STATION_LABELS[station].description}
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Giá bán (`price`) *
+                  <label className="block text-xs font-medium text-ink mb-1">
+                    Giá bán *
                   </label>
                   <input
                     type="number"
@@ -689,13 +681,13 @@ export function MenuManager({
                     required
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Giá vốn (`cost_price`) *
+                  <label className="block text-xs font-medium text-ink mb-1">
+                    Tiền vốn mỗi phần *
                   </label>
                   <input
                     type="number"
@@ -704,35 +696,20 @@ export function MenuManager({
                     required
                     value={costPrice}
                     onChange={(e) => setCostPrice(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1">
-                    Thời gian nấu chuẩn (phút) *
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    required
-                    value={prepTimeMinutes}
-                    onChange={(e) => setPrepTimeMinutes(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                    className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                   />
                 </div>
               </div>
 
               {/* Liên kết nguyên liệu kho tự động trừ khi bán bia/nước ngọt */}
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
-                  Liên kết nguyên liệu trừ kho tự động (`linked_ingredient_id`)
+                <label className="block text-xs font-medium text-ink mb-1">
+                  Hàng trong kho cần trừ khi bán
                 </label>
                 <select
                   value={linkedIngredientId}
                   onChange={(e) => setLinkedIngredientId(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2 rounded-lg bg-soft border border-line text-sm text-ink"
                 >
                   <option value="">-- Không liên kết trực tiếp --</option>
                   {ingredients.map((ing) => (
@@ -745,16 +722,16 @@ export function MenuManager({
 
               {/* Upload ảnh tự động nén WebP < 80KB */}
               <div className="space-y-2">
-                <label className="block text-xs font-medium text-zinc-300">
-                  Ảnh món ăn (Tự động nén WebP &lt; 80KB trước khi đẩy lên Supabase Storage)
+                <label className="block text-xs font-medium text-ink">
+                  Ảnh món ăn
                 </label>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                  <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium cursor-pointer border border-zinc-700">
-                    <Upload className="h-4 w-4 text-amber-400" />
+                  <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-muted hover:bg-stone-200 text-ink text-xs font-medium cursor-pointer border border-line">
+                    <Upload className="h-4 w-4 text-amber-800" />
                     <span>
                       {isUploadingImage
-                        ? 'Đang nén WebP & tải lên...'
-                        : 'Chọn file ảnh để nén WebP < 80KB'}
+                        ? 'Đang tải ảnh…'
+                        : 'Chọn ảnh món ăn'}
                     </span>
                     <input
                       type="file"
@@ -769,40 +746,40 @@ export function MenuManager({
                     type="text"
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="Hoặc dán trực tiếp URL ảnh WebP..."
-                    className="flex-1 w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200"
+                    placeholder="Hoặc dán đường dẫn ảnh…"
+                    className="flex-1 w-full px-3 py-2 rounded-lg bg-soft border border-line text-xs text-ink"
                   />
                 </div>
                 {compressionInfo && (
-                  <p className="text-xs text-emerald-400 font-medium">
+                  <p className="text-xs text-emerald-800 font-medium">
                     ✓ {compressionInfo}
                   </p>
                 )}
               </div>
 
-              {/* Trạng thái mở bán (86ing) */}
-              <label className="flex items-center gap-2.5 text-sm text-zinc-200 cursor-pointer">
+              {/* Trạng thái mở bán */}
+              <label className="flex items-center gap-2.5 text-sm text-ink cursor-pointer">
                 <input
                   type="checkbox"
                   checked={isAvailable}
                   onChange={(e) => setIsAvailable(e.target.checked)}
-                  className="rounded border-zinc-700 bg-zinc-950 text-amber-500"
+                  className="rounded border-line bg-soft text-amber-500"
                 />
-                <span>Đang còn hàng phục vụ (`is_available`)</span>
+                <span>Đang bán món này</span>
               </label>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-sm"
+                  className="px-4 py-2 rounded-lg bg-muted text-ink text-sm"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || isUploadingImage}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-sm"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-ink font-semibold text-sm"
                 >
                   {isSubmitting ? 'Đang lưu...' : 'Lưu món ăn'}
                 </button>

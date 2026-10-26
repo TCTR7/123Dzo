@@ -1,65 +1,23 @@
 'use client';
-
 import { useEffect, useRef, useState } from 'react';
+import { CircleHelp, X } from 'lucide-react';
 import type { StaffRole } from '@/types/database.types';
-
-type GuideTab = 'pwa' | 'admin' | 'staff' | 'kitchen';
-const tabs: { id: GuideTab; label: string; steps: string[] }[] = [
-  { id: 'pwa', label: '📱 Cài App & Bật chuông', steps: [
-    'iPhone / iPad: mở bằng Safari → Chia sẻ (Share) → Thêm vào MH chính (Add to Home Screen). Mở app từ màn hình chính và giữ app mở trong ca làm việc.',
-    'Android / máy tính bảng / Chrome: bấm Cài đặt ứng dụng trên thanh địa chỉ hoặc menu 3 chấm → Cài đặt / Thêm vào màn hình chính.',
-    'Đầu ca, bấm Kiểm tra chuông và bật âm lượng thiết bị. Thông báo nội bộ được backend gửi tới app đang mở; khi đóng app hoặc khóa máy sẽ không có thông báo nền. Giữ màn hình Bếp mở khi làm việc.',
-  ] },
-  { id: 'admin', label: '👑 Chủ quán', steps: [
-    'Dashboard KPI: xem doanh thu, lãi/lỗ, giờ vàng và hiệu suất bếp / nhân viên theo khoảng ngày.',
-    'Thu ngân & Hóa đơn: kiểm tra chuyển khoản đơn mang về, xác nhận đã nhận tiền, chốt bill và in nhiệt K80.',
-    'Thực đơn: thêm/sửa món, giá bán, giá vốn; gạt Báo hết món (86ing) khi tạm hết hàng.',
-    'Kho & Xuất nhập: nhập bia/nguyên liệu, ghi nhận hàng hỏng và kiểm tra tồn kho.',
-    'Bàn & Nhân sự: tạo khu vực, bàn và tài khoản đăng nhập cho nhân viên / đầu bếp; phân công khu vực.',
-  ] },
-  { id: 'staff', label: '🍻 Phục vụ', steps: [
-    'Khách vào bàn: bấm Mở bàn & Tạo QR, đưa khách quét QR của lượt khách đó để gọi món.',
-    'Món chín / bia lấy ngay: nghe chuông, bưng món và bấm Bưng ngay / Đã phục vụ để xác nhận.',
-    'Cuối buổi nếu còn bia: bấm Trả bia thừa và nhập số lượng thực tế.',
-    'Khách tính tiền: nhân viên phụ trách hoặc Chủ quán kiểm tra tiền rồi bấm Chốt & Đóng bill. QR bàn hết hiệu lực sau khi đóng.',
-  ] },
-  { id: 'kitchen', label: '🔥 Đầu bếp', steps: [
-    'Xem cột Gom món trùng (Batch Cooking) để nấu gộp cùng món của nhiều bàn.',
-    'Bấm Nhận nấu khi bắt đầu; bấm Hoàn thành khi ra món để gọi nhân viên vào bưng.',
-    'Hết nguyên liệu: dùng Báo hết món (86ing) để khóa món ngay trên thực đơn khách.',
-  ] },
+type Tab='install'|'admin'|'staff'|'kitchen';
+const tabs:{id:Tab;label:string;steps:string[]}[]=[
+  {id:'install',label:'Cài ứng dụng & Bật chuông',steps:['iPhone / iPad: mở bằng Safari → Chia sẻ → Thêm vào màn hình chính.','Android: mở bằng Chrome → menu ba chấm → Cài đặt ứng dụng hoặc Thêm vào màn hình chính.','Giữ ứng dụng mở trong ca làm việc để nhận thông báo món xong. Khi đóng ứng dụng hoặc khóa máy sẽ không có thông báo nền. Đầu ca hãy kiểm tra chuông và âm lượng.']},
+  {id:'admin',label:'Chủ quán',steps:['Tình hình quán: xem tiền bán hàng, ngày đông khách, món bán chạy và ít được gọi.','Thu ngân & Hóa đơn: thiết lập QR tài khoản nhận tiền, kiểm tra chuyển khoản, xác nhận nhận tiền và chốt hóa đơn.','Thực đơn: thêm món, sửa giá và bấm Báo hết món khi tạm hết.','Kho & Xuất nhập: nhập bia, nguyên liệu, ghi lại hàng hỏng và xem tồn kho.','Bàn & Nhân sự: nhập số bàn và tạo tài khoản bằng số điện thoại, mật khẩu cho người cùng làm.']},
+  {id:'staff',label:'Phục vụ',steps:['Khách vào: bấm Mở bàn để nhận phụ trách và đưa mã QR cho khách gọi món.','Món xong: nghe chuông, mang ra đúng bàn rồi bấm Đã bưng lên bàn. Đơn mang về: bấm Đã giao khách khi trao món.','Cuối buổi: trả bia thừa nếu có, kiểm tra tiền rồi chốt thanh toán. Muốn đổi người phụ trách, dùng bàn giao bàn.']},
+  {id:'kitchen',label:'Đầu bếp',steps:['Món gọi trước nằm trên. Xem kỹ ghi chú từng bàn. Có thể bật Gộp món giống nhau để làm chung.','Làm xong bấm Xong món. Món tiếp theo tự lên đầu; khách và người phụ trách tự nhận thông tin.','Hết nguyên liệu: bấm Báo hết món để khách biết ngay.']},
 ];
-
-export function OnboardingGuideModal({ role }: { role: StaffRole }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<GuideTab>(role === 'operator' ? 'admin' : role);
-  useEffect(() => {
-    try { setOpen(localStorage.getItem('dzo_onboarding_seen_v1') !== 'true'); }
-    catch { setOpen(true); }
-  }, []);
-  useEffect(() => {
-    if (open) dialog.current?.showModal();
-    else dialog.current?.close();
-  }, [open]);
-  function dismiss() {
-    try { localStorage.setItem('dzo_onboarding_seen_v1', 'true'); } catch { /* Private browsing: help remains available. */ }
-    setOpen(false);
-  }
-  const selected = tabs.find((entry) => entry.id === tab)!;
-  return <>
-    <button type="button" onClick={() => setOpen(true)} className="min-h-12 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-100">❓ Hướng dẫn & Cài App</button>
-    <dialog ref={dialog} aria-labelledby="onboarding-title" onCancel={(event) => { event.preventDefault(); dismiss(); }} className="w-[calc(100%_-_2rem)] max-w-2xl max-h-[90dvh] overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-zinc-100 shadow-2xl backdrop:bg-black/75">
-      <div className="flex items-center justify-between gap-3">
-        <h2 id="onboarding-title" className="text-xl font-bold text-amber-400">Bắt đầu cùng 123Dzô</h2>
-        <button type="button" autoFocus aria-label="Đóng hướng dẫn" onClick={dismiss} className="min-h-12 min-w-12 rounded-lg bg-zinc-800">✕</button>
-      </div>
-      <nav aria-label="Nội dung hướng dẫn" className="my-5 grid grid-cols-2 gap-2">
-        {tabs.map((entry) => <button key={entry.id} type="button" aria-pressed={tab === entry.id} onClick={() => setTab(entry.id)} className={`min-h-12 rounded-lg border p-2 text-sm ${tab === entry.id ? 'border-amber-400 bg-amber-500/15 text-amber-300' : 'border-zinc-700 bg-zinc-800'}`}>{entry.label}</button>)}
-      </nav>
-      <h3 className="font-bold">{selected.label}</h3>
-      <ol className="my-4 list-decimal space-y-3 pl-5 text-sm leading-relaxed text-zinc-200">{selected.steps.map((step) => <li key={step}>{step}</li>)}</ol>
-      <button type="button" onClick={dismiss} className="min-h-12 w-full rounded-xl bg-amber-500 px-4 py-3 font-bold text-zinc-950">Đã hiểu, bắt đầu làm việc</button>
-    </dialog>
-  </>;
+export function OnboardingGuideModal({role}:{role:StaffRole}) {
+  const ref=useRef<HTMLDialogElement>(null),[open,setOpen]=useState(false),[tab,setTab]=useState<Tab>(role==='operator'?'admin':role);
+  useEffect(()=>{try{setOpen(localStorage.getItem('dzo_onboarding_seen_v1')!=='true');}catch{setOpen(true);}},[]);
+  useEffect(()=>{if(open)ref.current?.showModal();else ref.current?.close();},[open]);
+  function dismiss(){try{localStorage.setItem('dzo_onboarding_seen_v1','true');}catch{}setOpen(false);}
+  const selected=tabs.find(t=>t.id===tab)!;
+  return <><button onClick={()=>setOpen(true)} className="neu-button flex min-h-12 items-center gap-2 px-3 py-2 text-xs font-semibold"><CircleHelp className="h-4 w-4" />Hướng dẫn & Cài ứng dụng</button><dialog ref={ref} aria-labelledby="guide-title" onCancel={e=>{e.preventDefault();dismiss();}} className="neu-card max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-2xl overflow-y-auto p-6 text-ink backdrop:bg-slate-900/35 backdrop:backdrop-blur-sm">
+    <div className="flex items-center justify-between gap-3"><div><p className="eyebrow">LÀM QUEN THẬT NHANH</p><h2 id="guide-title" className="mt-2 text-2xl font-bold">Bắt đầu cùng 123Dzô</h2></div><button autoFocus aria-label="Đóng hướng dẫn" onClick={dismiss} className="neu-button p-3"><X className="h-5 w-5" /></button></div>
+    <nav aria-label="Nội dung hướng dẫn" className="my-5 grid grid-cols-2 gap-3">{tabs.map(t=><button key={t.id} aria-pressed={tab===t.id} onClick={()=>setTab(t.id)} className={'neu-button min-h-12 p-3 text-sm '+(tab===t.id?'neu-selected':'')}>{t.label}</button>)}</nav>
+    <h3 className="font-bold">{selected.label}</h3><ol className="my-4 list-decimal space-y-4 pl-5 text-sm leading-relaxed">{selected.steps.map(s=><li key={s}>{s}</li>)}</ol><button onClick={dismiss} className="neu-button neu-selected min-h-12 w-full px-4 py-3 font-bold">Đã hiểu, bắt đầu làm việc</button>
+  </dialog></>;
 }

@@ -14,12 +14,14 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@clerk/localizations": "^3.37.10",
     "@clerk/nextjs": "^6.12.0",
     "@serwist/next": "^9.0.12",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.475.0",
     "next": "^15.2.0",
     "qrcode.react": "^4.2.0",

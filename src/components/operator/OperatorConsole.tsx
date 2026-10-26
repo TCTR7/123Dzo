@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { normalizePhoneUsername, PHONE_USERNAME_ERROR } from '@/lib/auth/phone-username';
 import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { AccountCredentials, type LoginCredentials } from '@/components/shared/AccountCredentials';
@@ -13,14 +15,14 @@ interface Props {
   counts: { table: string; count: number | null; connected: boolean }[];
   clerkConnected: boolean;
 }
-const inputClass = 'mt-1 min-h-12 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2';
-const buttonClass = 'min-h-12 rounded-xl bg-amber-500 px-4 py-3 font-semibold text-zinc-950 disabled:opacity-50';
+const inputClass = 'mt-1 min-h-12 w-full rounded-lg border border-line bg-soft px-3 py-2';
+const buttonClass = 'min-h-12 rounded-xl bg-amber-500 px-4 py-3 font-semibold text-ink disabled:opacity-50';
 const steps = [
   'Quét QR 1 để đăng nhập Chủ quán và cài App ra màn hình chính.',
   'Vào Thực đơn cập nhật món/giá; vào Bàn & Nhân sự tạo tài khoản nhân viên và đầu bếp.',
   'In QR 2 dán tại quầy. Khách ngồi tại bàn dùng QR mới do nhân viên bấm Mở bàn & Tạo QR.',
 ];
-const countLabels: Record<string, string> = { staff_profiles: 'Tài khoản', zones: 'Khu vực', tables: 'Bàn', menu_items: 'Món', table_sessions: 'Phiên đơn hàng' };
+const countLabels: Record<string, string> = { staff_profiles: 'Tài khoản', tables: 'Bàn', menu_items: 'Món', table_sessions: 'Phiên đơn hàng' };
 
 async function svgImage(svg: SVGSVGElement): Promise<HTMLImageElement> {
   const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' }));
@@ -35,7 +37,7 @@ async function svgImage(svg: SVGSVGElement): Promise<HTMLImageElement> {
 export function OperatorConsole({ version, environment, buildTime, appUrl, counts, clerkConnected }: Props) {
   const router = useRouter();
   const [origin, setOrigin] = useState('');
-  const [shop, setShop] = useState({ name: 'Quán Nhậu 123Dzô', address: '', phone: '', bank: '' });
+  const [shop, setShop] = useState({ name: 'Quán Nhậu 123Dzô', address: '' });
   const [fullName, setFullName] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -52,7 +54,7 @@ export function OperatorConsole({ version, environment, buildTime, appUrl, count
       const stored: unknown = JSON.parse(localStorage.getItem('dzo_handover_shop_v1') || 'null');
       if (stored && typeof stored === 'object') {
         const value = stored as Record<string, unknown>;
-        setShop({ name: typeof value.name === 'string' ? value.name : 'Quán Nhậu 123Dzô', address: typeof value.address === 'string' ? value.address : '', phone: typeof value.phone === 'string' ? value.phone : '', bank: typeof value.bank === 'string' ? value.bank : '' });
+        setShop({ name: typeof value.name === 'string' ? value.name : 'Quán Nhậu 123Dzô', address: typeof value.address === 'string' ? value.address : '' });
       }
     } catch { /* Storage is optional; credentials are never persisted. */ }
   }, [appUrl]);
@@ -68,9 +70,10 @@ export function OperatorConsole({ version, environment, buildTime, appUrl, count
     if (busy) return;
     setBusy(true); setMessage(''); setCredentials(null);
     try {
-      const login = identifier.trim();
+      const login = normalizePhoneUsername(identifier);
+      if (!login) throw Error(PHONE_USERNAME_ERROR);
       const response = await fetch('/api/accounts/provision', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName, password, role: 'admin', ...(login.includes('@') ? { emailAddress: login } : { username: login }) }) });
+        body: JSON.stringify({ fullName, password, role: 'admin', phoneNumber: login }) });
       const result = await response.json() as { error?: string; credentials: LoginCredentials };
       if (!response.ok) throw new Error(result.error || 'Không tạo được tài khoản.');
       setCredentials(result.credentials); setPassword('');
@@ -108,13 +111,12 @@ export function OperatorConsole({ version, environment, buildTime, appUrl, count
       ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 1200, 800);
       ctx.fillStyle = '#18181b'; ctx.fillRect(0, 0, 1200, 120);
       ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 24px Arial';
-      ctx.fillText('PHIẾU BÀN GIAO HỆ THỐNG SMART POS & KDS 123DZÔ', 40, 42);
+      ctx.fillText('PHIẾU BÀN GIAO QUÁN 123DZÔ', 40, 42);
       ctx.fillStyle = '#fff'; ctx.font = 'bold 30px Arial'; ctx.fillText(shop.name, 40, 88, 970);
       ctx.font = '18px Arial'; ctx.fillText(`v${version}`, 1060, 88, 100);
       ctx.fillStyle = '#18181b';
       const line = (text: string, y: number) => { ctx.font = '18px Arial'; ctx.fillText(text, 40, y, 1120); };
-      line(`${shop.address || 'Địa chỉ: —'} · Hotline: ${shop.phone || '—'}`, 150);
-      line(`Ngân hàng VietQR: ${shop.bank || '—'}`, 178);
+      line(shop.address || 'Địa chỉ: —', 150);
       line(`Đăng nhập quản trị: ${origin}/admin`, 212);
       line(`Tài khoản Chủ quán: ${credentials.loginIdentifier}`, 243);
       line(`Mật khẩu khởi tạo: ${credentials.password}`, 274);
@@ -137,29 +139,27 @@ export function OperatorConsole({ version, environment, buildTime, appUrl, count
   }
 
   return <main className="mx-auto max-w-6xl space-y-6">
-    <section className="operator-screen-only rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="operator-screen-only rounded-2xl border border-line bg-surface p-5">
       <h2 className="text-lg font-bold">Thông tin hệ thống · v{version}</h2>
-      <p className="mt-2 break-all text-sm text-zinc-400">{environment} · {appUrl || origin} · Build: {buildTime || 'Chưa có thông tin'}</p>
-      <p className="mt-2 text-sm">Supabase: {counts.every((item) => item.connected) ? 'Connected – 8 Core Tables' : 'Có lỗi kết nối, kiểm tra cấu hình Supabase'} · Clerk: {clerkConnected ? 'Connected' : 'Không kết nối được'}</p>
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-5">{counts.filter((item) => countLabels[item.table]).map((item) => <div key={item.table} className="rounded-xl bg-zinc-950 p-4"><p className="text-xs text-zinc-400">{countLabels[item.table]}</p><p className="text-2xl font-bold text-amber-400">{item.count ?? '—'}</p></div>)}</div>
+      <p className="mt-2 break-all text-sm text-muted-ink">{environment} · {appUrl || origin} · Bản phát hành: {buildTime || 'Chưa có thông tin'}</p>
+      <p className="mt-2 text-sm">Dữ liệu: {counts.every((item) => item.connected) ? 'Đã kết nối' : 'Chưa kết nối được dữ liệu'} · Đăng nhập: {clerkConnected ? 'Đã kết nối' : 'Không kết nối được'}</p>
+      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-5">{counts.filter((item) => countLabels[item.table]).map((item) => <div key={item.table} className="rounded-xl bg-soft p-4"><p className="text-xs text-muted-ink">{countLabels[item.table]}</p><p className="text-2xl font-bold text-amber-800">{item.count ?? '—'}</p></div>)}</div>
     </section>
-    <section className="operator-screen-only rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="operator-screen-only rounded-2xl border border-line bg-surface p-5">
       <h2 className="mb-4 text-lg font-bold">Thông tin quán & Tài khoản Chủ quán</h2>
       <form onSubmit={provision} className="grid gap-4 md:grid-cols-2">
         <label className="text-sm">Tên quán<input required maxLength={100} value={shop.name} onChange={(e) => updateShop('name', e.target.value)} className={inputClass} /></label>
         <label className="text-sm">Địa chỉ<input maxLength={180} value={shop.address} onChange={(e) => updateShop('address', e.target.value)} className={inputClass} /></label>
-        <label className="text-sm">Hotline<input type="tel" maxLength={30} value={shop.phone} onChange={(e) => updateShop('phone', e.target.value)} className={inputClass} /></label>
-        <label className="text-sm">Ngân hàng / Số tài khoản VietQR<input maxLength={120} value={shop.bank} onChange={(e) => updateShop('bank', e.target.value)} className={inputClass} /></label>
         <label className="text-sm">Họ tên Chủ quán<input required maxLength={200} value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputClass} /></label>
-        <label className="text-sm">Email / Tên đăng nhập<input required maxLength={254} autoComplete="off" value={identifier} onChange={(e) => setIdentifier(e.target.value)} className={inputClass} /></label>
+        <label className="text-sm">Số điện thoại đăng nhập<input type="tel" inputMode="tel" required maxLength={40} autoComplete="off" value={identifier} onChange={(e) => setIdentifier(e.target.value)} className={inputClass} /></label>
         <label className="text-sm">Mật khẩu khởi tạo<input type="password" required minLength={8} maxLength={128} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} /></label>
         <button disabled={busy} className={`${buttonClass} self-end`}>{busy ? 'Đang xử lý…' : 'Tạo Tài Khoản Chủ Quán & Sinh Phiếu Bàn Giao'}</button>
       </form>
-      {credentials && <div className="mt-4"><AccountCredentials credentials={credentials} /></div>}
+      {credentials && <div className="mt-4"><AccountCredentials credentials={credentials} /><Link className="mt-3 block text-sm font-bold text-teal-800 underline" href="/admin/bills">Thiết lập QR nhận tiền giúp chủ quán</Link></div>}
     </section>
-    <p role="status" aria-live="polite" className="operator-screen-only text-sm text-amber-300">{message}</p>
-    <section id="handover-kit" className="rounded-2xl bg-white p-6 text-zinc-900 md:p-8">
-      <div className="border-b-2 border-amber-500 pb-4"><p className="text-xs font-bold tracking-wider">PHIẾU BÀN GIAO HỆ THỐNG SMART POS & KDS 123DZÔ</p><h2 className="mt-2 text-3xl font-bold">{shop.name} <span className="text-base font-normal">v{version}</span></h2><p className="mt-2 break-words text-sm">{shop.address} · Hotline: {shop.phone || '—'}</p>{shop.bank && <p className="text-sm">Ngân hàng VietQR: {shop.bank}</p>}</div>
+    <p role="status" aria-live="polite" className="operator-screen-only text-sm text-amber-800">{message}</p>
+    <section id="handover-kit" className="rounded-2xl bg-white p-6 text-ink md:p-8">
+      <div className="border-b-2 border-amber-500 pb-4"><p className="text-xs font-bold tracking-wider">PHIẾU BÀN GIAO QUÁN 123DZÔ</p><h2 className="mt-2 text-3xl font-bold">{shop.name} <span className="text-base font-normal">v{version}</span></h2><p className="mt-2 break-words text-sm">{shop.address}</p></div>
       <div className="my-5 space-y-1 break-all text-sm"><p>Đăng nhập quản trị: <strong>{origin}/admin</strong></p><p>Tài khoản Chủ quán: <strong>{credentials?.loginIdentifier || 'Chưa tạo tài khoản'}</strong></p><p>Mật khẩu khởi tạo: <strong>{credentials?.password || '—'}</strong></p></div>
       <div className="grid grid-cols-1 gap-6 text-center sm:grid-cols-2 print:grid-cols-2">
         <div><div ref={qrAdmin} className="flex justify-center">{origin && <QRCodeSVG value={`${origin}/admin`} size={220} level="M" marginSize={4} />}</div><h3 className="mt-2 font-bold">QR 1 · Đăng nhập Chủ quán</h3><p className="break-all text-xs">{origin}/admin</p></div>
@@ -168,9 +168,9 @@ export function OperatorConsole({ version, environment, buildTime, appUrl, count
       <h3 className="mt-6 font-bold">3 bước bắt đầu dành cho Chủ quán</h3><ol className="mt-2 list-decimal space-y-2 pl-5 text-sm">{steps.map((step) => <li key={step}>{step}</li>)}</ol>
     </section>
     <div className="operator-screen-only flex flex-wrap gap-3"><button onClick={downloadPng} disabled={busy || !credentials || !origin} className={buttonClass}>🖼️ Tải Ảnh Bàn Giao (.PNG)</button><button onClick={() => window.print()} disabled={busy || !credentials || !origin} className={buttonClass}>📄 Xuất / In File .PDF</button></div>
-    <section className="operator-screen-only rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-      <h2 className="text-lg font-bold">Tiện ích trước khai trương</h2><p className="my-3 text-sm text-zinc-400">Tạo mẫu khi chưa có bàn và món. Reset xóa toàn bộ hóa đơn, kể cả đã thanh toán; giữ nguyên thực đơn, khu vực, nhân sự và kho.</p>
-      <div className="flex flex-wrap gap-3"><button disabled={busy} onClick={() => runTool('seed')} className={buttonClass}>🌱 Tạo dữ liệu mẫu (Khu vực, Bàn & Menu mẫu)</button><button disabled={busy} onClick={() => runTool('reset')} className="min-h-12 rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3 font-semibold text-red-300 disabled:opacity-50">🧹 Xóa dữ liệu hóa đơn test</button></div>
+    <section className="operator-screen-only rounded-2xl border border-line bg-surface p-5">
+      <h2 className="text-lg font-bold">Tiện ích trước khai trương</h2><p className="my-3 text-sm text-muted-ink">Tạo mẫu khi chưa có bàn và món. Reset xóa toàn bộ hóa đơn, kể cả đã thanh toán; giữ nguyên thực đơn, nhân sự và kho.</p>
+      <div className="flex flex-wrap gap-3"><button disabled={busy} onClick={() => runTool('seed')} className={buttonClass}>🌱 Tạo bàn & Thực đơn mẫu</button><button disabled={busy} onClick={() => runTool('reset')} className="min-h-12 rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3 font-semibold text-red-800 disabled:opacity-50">🧹 Xóa dữ liệu hóa đơn test</button></div>
     </section>
     <style>{`@media print {
       @page { size: A4 portrait; margin: 12mm; }

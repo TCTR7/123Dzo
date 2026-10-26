@@ -27,7 +27,6 @@ import type { KitchenQueueEntry } from '@/lib/services/snapshots';
 import { useCartStore } from '@/lib/store/useCartStore';
 import {
   formatVND,
-  formatDurationFromSeconds,
   cn,
 } from '@/lib/utils';
 import type {
@@ -98,7 +97,7 @@ export function DineInOrderView({
   const lastSubmitTimestampRef = useRef<number>(0);
 
   // Đồng hồ nhảy mỗi giây cho tab Tiến độ Bếp (đếm ngược thời gian nấu)
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
 
   const [feedbackMessage, setFeedbackMessage] = useState<{
     type: 'success' | 'error';
@@ -130,7 +129,6 @@ export function DineInOrderView({
   // Bộ đếm nhịp 1 giây phục vụ đồng hồ đếm ngược thời gian nấu & cooldown 5s
   useEffect(() => {
     const interval = setInterval(() => {
-      setNowMs(Date.now());
       setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(interval);
@@ -328,17 +326,17 @@ export function DineInOrderView({
   // ==========================================================================
   if (session.status === 'CLOSED' || session.status === 'PENDING_PAYMENT') {
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center space-y-4">
-          <div className="h-16 w-16 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto text-red-400">
+      <div className="min-h-screen bg-soft text-ink flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-surface border border-line rounded-3xl p-8 text-center space-y-4">
+          <div className="h-16 w-16 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto text-red-800">
             <Lock className="h-8 w-8" />
           </div>
-          <h1 className="text-2xl font-extrabold text-zinc-100">
+          <h1 className="text-2xl font-extrabold text-ink">
             {session.status === 'CLOSED'
               ? 'Phiên nhậu đã kết thúc'
               : 'Phiên bàn chưa kích hoạt'}
           </h1>
-          <p className="text-sm text-zinc-400 leading-relaxed">
+          <p className="text-sm text-muted-ink leading-relaxed">
             {session.status === 'CLOSED'
               ? 'Bàn này đã thanh toán xong và mã QR theo phiên đã được vô hiệu hóa để bảo mật. Vui lòng nhờ nhân viên mở phiên bàn mới nếu bạn muốn gọi món.'
               : 'Đơn hàng chưa được kích hoạt thanh toán.'}
@@ -353,22 +351,18 @@ export function DineInOrderView({
   const canOrderMore = session.status === 'ACTIVE';
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-28 max-w-lg mx-auto border-x border-zinc-900">
+    <div className="min-h-screen bg-soft text-ink pb-28 max-w-lg mx-auto border-x border-line">
       {/* Header Thông tin Bàn & Nút Chia sẻ QR cho bạn nhậu cùng bàn */}
-      <header className="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 px-4 py-3 space-y-3">
+      <header className="sticky top-0 z-30 bg-soft/90 backdrop-blur-md border-b border-line px-4 py-3 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-500 text-zinc-950">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-500 text-ink">
                 {table?.table_number ?? 'Bàn nhậu'}
               </span>
-              {zone && (
-                <span className="text-xs text-zinc-400 font-medium">
-                  • {zone.name}
-                </span>
-              )}
+
             </div>
-            <h1 className="text-base font-bold text-zinc-100 mt-1">
+            <h1 className="text-base font-bold text-ink mt-1">
               123Dzô • Thực đơn & Tiến độ Bếp
             </h1>
           </div>
@@ -376,7 +370,7 @@ export function DineInOrderView({
           <button
             type="button"
             onClick={() => setIsShareQrOpen(true)}
-            className="min-h-12 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 border border-amber-500/40 text-xs font-bold shrink-0"
+            className="min-h-12 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface hover:bg-muted text-amber-800 border border-amber-500/40 text-xs font-bold shrink-0"
           >
             <QrCode className="h-4 w-4" />
             Hiện QR bàn
@@ -384,15 +378,15 @@ export function DineInOrderView({
         </div>
 
         {/* Thanh chuyển đổi 3 Tab (Thực đơn | Tiến độ Bếp | Hóa đơn) */}
-        <div className="grid grid-cols-3 gap-1.5 bg-zinc-900 p-1 rounded-2xl border border-zinc-800">
+        <div className="grid grid-cols-3 gap-1.5 bg-surface p-1 rounded-2xl border border-line">
           <button
             type="button"
             onClick={() => setActiveTab('MENU')}
             className={cn(
               'min-h-12 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all',
               activeTab === 'MENU'
-                ? 'bg-amber-500 text-zinc-950 shadow'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-amber-500 text-ink shadow'
+                : 'text-muted-ink hover:text-ink'
             )}
           >
             <UtensilsCrossed className="h-4 w-4" />
@@ -405,8 +399,8 @@ export function DineInOrderView({
             className={cn(
               'min-h-12 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all relative',
               activeTab === 'PROGRESS'
-                ? 'bg-amber-500 text-zinc-950 shadow'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-amber-500 text-ink shadow'
+                : 'text-muted-ink hover:text-ink'
             )}
           >
             <Flame className="h-4 w-4" />
@@ -424,8 +418,8 @@ export function DineInOrderView({
             className={cn(
               'min-h-12 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all',
               activeTab === 'BILL'
-                ? 'bg-amber-500 text-zinc-950 shadow'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-amber-500 text-ink shadow'
+                : 'text-muted-ink hover:text-ink'
             )}
           >
             <Receipt className="h-4 w-4" />
@@ -433,6 +427,8 @@ export function DineInOrderView({
           </button>
         </div>
       </header>
+      {sessionOrders.some(i => i.status === 'READY') && <div role="status" aria-live="polite" className="m-4 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800"><strong>Món đã sẵn sàng, đã báo nhân viên mang ra:</strong><ul className="mt-2">{sessionOrders.filter(i => i.status === 'READY').map(i => <li key={i.id}>{i.quantity} × {menuMap.get(i.menu_item_id)?.name ?? 'Món của bạn'}</li>)}</ul></div>}
+
 
       {/* Thông báo phản hồi */}
       {feedbackMessage && (
@@ -440,8 +436,8 @@ export function DineInOrderView({
           className={cn(
             'mx-4 mt-3 p-3.5 rounded-2xl border text-xs font-medium flex items-center justify-between gap-2',
             feedbackMessage.type === 'success'
-              ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-200'
-              : 'bg-red-950/70 border-red-500/40 text-red-200'
+              ? 'bg-emerald-50/70 border-emerald-500/40 text-emerald-800'
+              : 'bg-red-50/70 border-red-500/40 text-red-800'
           )}
         >
           <span>{feedbackMessage.text}</span>
@@ -461,10 +457,10 @@ export function DineInOrderView({
       {activeTab === 'MENU' && (
         <div className="p-4 space-y-4">
           {!canOrderMore && (
-            <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+            <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-800 text-xs flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-800 shrink-0" />
               <span>
-                Bàn đang gửi yêu cầu thanh toán (`REQUEST_BILL`). Vui lòng báo nhân viên nếu muốn gọi thêm mồi/bia.
+                Bàn đang chờ thanh toán. Vui lòng báo nhân viên nếu muốn gọi thêm mồi/bia.
               </span>
             </div>
           )}
@@ -472,13 +468,13 @@ export function DineInOrderView({
           {/* Tìm kiếm & Lọc danh mục */}
           <div className="space-y-2.5">
             <div className="relative">
-              <Search className="h-4 w-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Search className="h-4 w-4 text-muted-ink absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Tìm món nhậu, bia, nước ngọt..."
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-sm text-zinc-100"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-surface border border-line text-sm text-ink"
               />
             </div>
 
@@ -491,8 +487,8 @@ export function DineInOrderView({
                   className={cn(
                     'min-h-12 px-4 py-2 rounded-xl text-xs font-bold border shrink-0 transition-colors',
                     selectedCategory === tab.key
-                      ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                      : 'bg-zinc-900 text-zinc-300 border-zinc-800'
+                      ? 'bg-amber-500 text-ink border-amber-500'
+                      : 'bg-surface text-ink border-line'
                   )}
                 >
                   {tab.label}
@@ -512,13 +508,13 @@ export function DineInOrderView({
                 <div
                   key={item.id}
                   className={cn(
-                    'p-3.5 rounded-2xl border bg-zinc-900 flex gap-3.5 items-center transition-all',
+                    'p-3.5 rounded-2xl border bg-surface flex gap-3.5 items-center transition-all',
                     item.is_available
-                      ? 'border-zinc-800'
-                      : 'border-zinc-800/50 opacity-60'
+                      ? 'border-line'
+                      : 'border-line/50 opacity-60'
                   )}
                 >
-                  <div className="h-20 w-20 rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden shrink-0 flex items-center justify-center">
+                  <div className="h-20 w-20 rounded-xl bg-soft border border-line overflow-hidden shrink-0 flex items-center justify-center">
                     {item.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -527,35 +523,35 @@ export function DineInOrderView({
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <UtensilsCrossed className="h-6 w-6 text-zinc-700" />
+                      <UtensilsCrossed className="h-6 w-6 text-ink" />
                     )}
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       {item.station === 'BAR_INSTANT' ? (
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] font-bold">
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-800 text-[10px] font-bold">
                           Mang ra ngay
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded bg-orange-500/15 text-orange-300 text-[10px] font-bold">
-                          ~{item.prep_time_minutes} phút
+                        <span className="px-2 py-0.5 rounded bg-orange-500/15 text-orange-800 text-[10px] font-bold">
+                          Bếp làm khi nhận món
                         </span>
                       )}
                     </div>
 
-                    <h3 className="font-bold text-sm text-zinc-100 mt-1 truncate">
+                    <h3 className="font-bold text-sm text-ink mt-1 truncate">
                       {item.name}
                     </h3>
 
-                    <div className="text-amber-400 font-extrabold text-sm mt-1">
+                    <div className="text-amber-800 font-extrabold text-sm mt-1">
                       {formatVND(item.price)}
                     </div>
                   </div>
 
                   <div className="shrink-0">
                     {!item.is_available ? (
-                      <span className="px-2.5 py-1.5 rounded-xl bg-red-500/15 text-red-400 border border-red-500/30 text-xs font-bold">
+                      <span className="px-2.5 py-1.5 rounded-xl bg-red-500/15 text-red-800 border border-red-500/30 text-xs font-bold">
                         Tạm hết
                       </span>
                     ) : (
@@ -573,7 +569,7 @@ export function DineInOrderView({
                             image_url: item.image_url,
                           })
                         }
-                        className="min-h-12 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-zinc-950 font-extrabold text-xs inline-flex items-center gap-1.5 active:scale-95 transition-transform"
+                        className="min-h-12 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-ink font-extrabold text-xs inline-flex items-center gap-1.5 active:scale-95 transition-transform"
                       >
                         <Plus className="h-4 w-4" />
                         {inCartQty > 0 ? `Thêm (${inCartQty})` : 'Chọn'}
@@ -592,86 +588,48 @@ export function DineInOrderView({
       {/* ==================================================================== */}
       {activeTab === 'PROGRESS' && (
         <div className="p-4 space-y-4">
-          <div className="p-3.5 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-between">
+          <div className="p-3.5 rounded-2xl bg-surface border border-line flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <ChefHat className="h-5 w-5 text-amber-400" />
+              <ChefHat className="h-5 w-5 text-amber-800" />
               <div>
-                <h2 className="text-sm font-bold text-zinc-100">
+                <h2 className="text-sm font-bold text-ink">
                   Trạng thái món ăn thời gian thực
                 </h2>
-                <p className="text-[11px] text-zinc-400">
-                  Tự động cập nhật vị trí xếp hàng trong Bếp & đồng hồ nấu
+                <p className="text-[11px] text-muted-ink">
+                  Món xong sẽ tự báo ở đây. Nhân viên sẽ mang ra bàn.
                 </p>
               </div>
             </div>
           </div>
 
           {sessionOrders.length === 0 ? (
-            <div className="py-12 text-center bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-500 text-sm">
+            <div className="py-12 text-center bg-surface border border-line rounded-2xl text-muted-ink text-sm">
               Bàn chưa gọi món nào. Hãy qua tab Thực đơn để chọn mồi & bia nhé!
             </div>
           ) : (
             <div className="space-y-3">
               {sessionOrders.map((order) => {
                 const menu = menuMap.get(order.menu_item_id);
-                const prepMinutes = menu?.prep_time_minutes ?? 10;
-
-                // Tính vị trí hàng đợi theo đúng công thức Mục 5.3 nếu đang QUEUED ở KITCHEN
-                const queuePosition =
-                  order.status === 'QUEUED' && order.station === 'KITCHEN'
-                    ? getQueuePositionForOrderItem(order)
-                    : null;
-
-                // Tính đồng hồ đếm ngược thời gian nấu khi status === 'COOKING'
-                let remainingCookSeconds = 0;
-                let progressPercent = 0;
-                if (order.status === 'COOKING' && order.cooking_started_at) {
-                  const startedMs = new Date(
-                    order.cooking_started_at
-                  ).getTime();
-                  const totalPrepSeconds = Math.max(60, prepMinutes * 60);
-                  const elapsedSeconds = Math.max(
-                    0,
-                    Math.floor((nowMs - startedMs) / 1000)
-                  );
-                  remainingCookSeconds = Math.max(
-                    0,
-                    totalPrepSeconds - elapsedSeconds
-                  );
-                  progressPercent = Math.min(
-                    100,
-                    Math.round((elapsedSeconds / totalPrepSeconds) * 100)
-                  );
-                }
-
-                // Ước lượng số phút hoàn thành khi đang QUEUED
-                const estimatedWaitMinutes =
-                  queuePosition !== null
-                    ? Math.max(
-                        prepMinutes,
-                        Math.ceil(queuePosition * (prepMinutes * 0.6))
-                      )
-                    : 0;
-
+                const queuePosition = order.status === 'QUEUED' && order.station === 'KITCHEN' ? getQueuePositionForOrderItem(order) : null;
                 return (
                   <div
                     key={order.id}
-                    className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-3"
+                    className="p-4 rounded-2xl bg-surface border border-line space-y-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-base text-zinc-100">
+                          <span className="font-extrabold text-base text-ink">
                             {order.quantity}x {menu?.name ?? 'Món ăn'}
                           </span>
                           {order.batch_id && order.status === 'COOKING' && (
-                            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 text-[10px] font-bold">
                               Nấu gộp mẻ nhanh
                             </span>
                           )}
                         </div>
                         {order.note && (
-                          <p className="text-xs text-zinc-400 mt-0.5">
+                          <p className="text-xs text-muted-ink mt-0.5">
                             Ghi chú: {order.note}
                           </p>
                         )}
@@ -679,27 +637,27 @@ export function DineInOrderView({
 
                       {/* Nhãn trạng thái */}
                       {order.status === 'QUEUED' && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          Đang chờ bếp
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-800 border border-amber-500/30">
+                          Bếp đã nhận món
                         </span>
                       )}
                       {order.status === 'COOKING' && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-orange-500/20 text-orange-300 border border-orange-500/40 animate-pulse">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-orange-500/20 text-orange-800 border border-orange-500/40 animate-pulse">
                           🔥 Bếp đang nấu
                         </span>
                       )}
                       {order.status === 'READY' && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-800 border border-emerald-500/40">
                           ✨ Món đã chín
                         </span>
                       )}
                       {order.status === 'SERVED' && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-zinc-800 text-zinc-300">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-muted text-ink">
                           ✓ Đã lên bàn
                         </span>
                       )}
                       {order.status === 'CANCELLED' && (
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-400">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-800">
                           Đã hủy
                         </span>
                       )}
@@ -707,56 +665,25 @@ export function DineInOrderView({
 
                     {/* Hiển thị chi tiết Vị trí hàng đợi (Mục 5.3) */}
                     {order.status === 'QUEUED' && queuePosition !== null && (
-                      <div className="p-3 rounded-xl bg-zinc-950 border border-amber-500/30 flex items-center justify-between">
+                      <div className="p-3 rounded-xl bg-soft border border-amber-500/30 flex items-center justify-between">
                         <div>
-                          <span className="text-xs text-zinc-400 block">
+                          <span className="text-xs text-muted-ink block">
                             Vị trí trong hàng đợi Bếp toàn quán:
                           </span>
-                          <span className="text-sm font-extrabold text-amber-400">
+                          <span className="text-sm font-extrabold text-amber-800">
                             Đang xếp thứ #{queuePosition}
                           </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-xs text-zinc-400 block">
-                            Dự kiến hoàn thành
-                          </span>
-                          <span className="text-sm font-bold text-zinc-200">
-                            ~{estimatedWaitMinutes} phút nữa
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Hiển thị Đồng hồ đếm ngược thời gian nấu khi COOKING */}
-                    {order.status === 'COOKING' && (
-                      <div className="p-3 rounded-xl bg-zinc-950 border border-orange-500/40 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-orange-300 font-semibold inline-flex items-center gap-1.5">
-                            <Clock className="h-3.5 w-3.5" />
-                            Thời gian nấu còn lại:
-                          </span>
-                          <span className="font-mono text-base font-black text-amber-400">
-                            {remainingCookSeconds > 0
-                              ? formatDurationFromSeconds(remainingCookSeconds)
-                              : 'Sắp ra đĩa!'}
-                          </span>
-                        </div>
-                        <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
-                            style={{ width: `${progressPercent}%` }}
-                          />
                         </div>
                       </div>
                     )}
 
                     {order.status === 'READY' && (
-                      <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+                      <div className="p-2.5 rounded-xl bg-emerald-50/40 border border-emerald-500/30 text-xs text-emerald-800 flex items-center gap-2">
                         <Sparkles className="h-4 w-4 shrink-0" />
                         <span>
                           {order.station === 'BAR_INSTANT'
                             ? 'Đã báo nhân viên lấy đồ uống mang ra bàn!'
-                            : 'Đầu bếp đã nấu xong, nhân viên đang bưng ra bàn!'}
+                            : 'Món đã xong, đã báo nhân viên mang ra bàn!'}
                         </span>
                       </div>
                     )}
@@ -774,22 +701,22 @@ export function DineInOrderView({
       {activeTab === 'BILL' && (
         <div className="p-4 space-y-5">
           {/* Bảng kê hóa đơn tạm tính */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h2 className="font-bold text-base text-zinc-100">
+          <div className="bg-surface border border-line rounded-2xl p-4 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h2 className="font-bold text-base text-ink">
                 Chi tiết hóa đơn tại bàn
               </h2>
-              <span className="text-xs text-zinc-400">
+              <span className="text-xs text-muted-ink">
                 {validBillOrders.length} lượt gọi
               </span>
             </div>
 
             {validBillOrders.length === 0 ? (
-              <p className="py-6 text-center text-xs text-zinc-500">
+              <p className="py-6 text-center text-xs text-muted-ink">
                 Chưa có món ăn nào trong hóa đơn.
               </p>
             ) : (
-              <div className="divide-y divide-zinc-800/80 text-sm">
+              <div className="divide-y divide-line/80 text-sm">
                 {validBillOrders.map((item) => {
                   const menu = menuMap.get(item.menu_item_id);
                   return (
@@ -798,14 +725,14 @@ export function DineInOrderView({
                       className="py-2.5 flex items-center justify-between gap-2"
                     >
                       <div>
-                        <span className="font-semibold text-zinc-100">
+                        <span className="font-semibold text-ink">
                           {item.quantity}x {menu?.name ?? 'Món gọi'}
                         </span>
-                        <span className="block text-xs text-zinc-500">
+                        <span className="block text-xs text-muted-ink">
                           Đơn giá: {formatVND(item.unit_price)}
                         </span>
                       </div>
-                      <span className="font-bold text-zinc-100">
+                      <span className="font-bold text-ink">
                         {formatVND(item.unit_price * item.quantity)}
                       </span>
                     </div>
@@ -814,25 +741,25 @@ export function DineInOrderView({
               </div>
             )}
 
-            <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
-              <span className="text-sm font-bold text-zinc-300">
+            <div className="pt-3 border-t border-line flex items-center justify-between">
+              <span className="text-sm font-bold text-ink">
                 Tổng cộng tạm tính:
               </span>
-              <span className="text-2xl font-black text-amber-400">
+              <span className="text-2xl font-black text-amber-800">
                 {formatVND(liveBillTotalAmount)}
               </span>
             </div>
           </div>
 
           {/* Tiện ích Chia tiền Campuchia theo số người */}
-          <div className="bg-zinc-900 border border-amber-500/30 rounded-2xl p-4 space-y-4">
+          <div className="bg-surface border border-amber-500/30 rounded-2xl p-4 space-y-4">
             <div className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-amber-400" />
+              <Users className="h-5 w-5 text-amber-800" />
               <div>
-                <h3 className="font-bold text-sm text-zinc-100">
+                <h3 className="font-bold text-sm text-ink">
                   Chia tiền Campuchia (Chia đều theo đầu người)
                 </h3>
-                <p className="text-xs text-zinc-400">
+                <p className="text-xs text-muted-ink">
                   Chọn số anh em ngồi chung bàn để tính nhanh mỗi người đóng bao nhiêu
                 </p>
               </div>
@@ -845,30 +772,30 @@ export function DineInOrderView({
                   onClick={() =>
                     setCampuchiaCount((c) => Math.max(1, c - 1))
                   }
-                  className="min-h-12 w-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-100 font-bold"
+                  className="min-h-12 w-12 rounded-xl bg-muted hover:bg-stone-200 flex items-center justify-center text-ink font-bold"
                 >
                   <Minus className="h-4 w-4" />
                 </button>
-                <div className="px-4 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-center min-w-[90px]">
-                  <span className="text-lg font-black text-amber-400">
+                <div className="px-4 py-2 rounded-xl bg-soft border border-line text-center min-w-[90px]">
+                  <span className="text-lg font-black text-amber-800">
                     {campuchiaCount}
                   </span>
-                  <span className="text-xs text-zinc-400 block">người</span>
+                  <span className="text-xs text-muted-ink block">người</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCampuchiaCount((c) => c + 1)}
-                  className="min-h-12 w-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-100 font-bold"
+                  className="min-h-12 w-12 rounded-xl bg-muted hover:bg-stone-200 flex items-center justify-center text-ink font-bold"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
 
               <div className="text-right">
-                <span className="text-xs text-zinc-400 block">
+                <span className="text-xs text-muted-ink block">
                   Mỗi người đóng:
                 </span>
-                <span className="text-xl font-black text-emerald-400">
+                <span className="text-xl font-black text-emerald-800">
                   {formatVND(perPersonCampuchia)}
                 </span>
               </div>
@@ -883,8 +810,8 @@ export function DineInOrderView({
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors',
                     campuchiaCount === num
-                      ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                      : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+                      ? 'bg-amber-500 text-ink border-amber-500'
+                      : 'bg-soft text-muted-ink border-line'
                   )}
                 >
                   {num} người
@@ -894,8 +821,8 @@ export function DineInOrderView({
           </div>
 
           {/* Khu vực Gọi tính tiền (US-C04) */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
-            <h3 className="font-bold text-sm text-zinc-100">
+          <div className="bg-surface border border-line rounded-2xl p-4 space-y-4">
+            <h3 className="font-bold text-sm text-ink">
               Yêu cầu Thanh toán tại bàn
             </h3>
 
@@ -906,11 +833,11 @@ export function DineInOrderView({
                 className={cn(
                   'min-h-12 p-3 rounded-xl border text-xs font-bold',
                   selectedPaymentMethod === 'VIETQR'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500'
-                    : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+                    ? 'bg-amber-500/20 text-amber-800 border-amber-500'
+                    : 'bg-soft text-muted-ink border-line'
                 )}
               >
-                Chuyển khoản QR (VIETQR)
+                Chuyển khoản
               </button>
               <button
                 type="button"
@@ -918,11 +845,11 @@ export function DineInOrderView({
                 className={cn(
                   'min-h-12 p-3 rounded-xl border text-xs font-bold',
                   selectedPaymentMethod === 'CASH'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500'
-                    : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+                    ? 'bg-amber-500/20 text-amber-800 border-amber-500'
+                    : 'bg-soft text-muted-ink border-line'
                 )}
               >
-                Tiền mặt (CASH)
+                Tiền mặt
               </button>
             </div>
 
@@ -934,7 +861,7 @@ export function DineInOrderView({
                 session.status === 'REQUEST_BILL'
               }
               onClick={handleRequestBill}
-              className="min-h-12 w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold text-sm flex items-center justify-center gap-2"
+              className="min-h-12 w-full py-3.5 px-4 rounded-2xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-extrabold text-sm flex items-center justify-center gap-2"
             >
               <CheckCircle2 className="h-5 w-5" />
               {session.status === 'REQUEST_BILL'
@@ -949,11 +876,11 @@ export function DineInOrderView({
       {/* THANH GIỎ HÀNG NỔI PHÍA DƯỚI MÀN HÌNH */}
       {/* ==================================================================== */}
       {totalCartItems > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 p-3 bg-zinc-950/95 backdrop-blur border-t border-zinc-800 max-w-lg mx-auto">
+        <div className="fixed bottom-0 left-0 right-0 z-40 p-3 bg-soft/95 backdrop-blur border-t border-line max-w-lg mx-auto">
           <button
             type="button"
             onClick={() => setIsCartDrawerOpen(true)}
-            className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-sm flex items-center justify-between shadow-lg"
+            className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-ink font-extrabold text-sm flex items-center justify-between shadow-lg"
           >
             <span className="inline-flex items-center gap-2">
               <ShoppingBag className="h-5 w-5" />
@@ -968,22 +895,22 @@ export function DineInOrderView({
       {/* DRAWER XEM GIỎ HÀNG & GỬI ĐƠN (CHỐNG BẤM ĐÚP 5 GIÂY) */}
       {/* ==================================================================== */}
       {isCartDrawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center">
-          <div className="bg-zinc-900 border-t border-zinc-800 rounded-t-3xl max-w-lg w-full p-5 space-y-4 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-extrabold text-zinc-100">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-end justify-center">
+          <div className="bg-surface border-t border-line rounded-t-3xl max-w-lg w-full p-5 space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-extrabold text-ink">
                 Giỏ hàng của {table?.table_number ?? 'Bàn'}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsCartDrawerOpen(false)}
-                className="p-1 text-zinc-400 hover:text-white"
+                className="p-1 text-muted-ink hover:text-ink"
               >
                 <X className="h-6 w-6" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800 space-y-3 pr-1">
+            <div className="flex-1 overflow-y-auto divide-y divide-line space-y-3 pr-1">
               {cartItems.map((item) => (
                 <div
                   key={`${item.menu_item_id}-${item.note}`}
@@ -991,10 +918,10 @@ export function DineInOrderView({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <h4 className="font-bold text-sm text-zinc-100">
+                      <h4 className="font-bold text-sm text-ink">
                         {item.name}
                       </h4>
-                      <span className="text-xs font-semibold text-amber-400">
+                      <span className="text-xs font-semibold text-amber-800">
                         {formatVND(item.unit_price * item.quantity)}
                       </span>
                     </div>
@@ -1009,7 +936,7 @@ export function DineInOrderView({
                             item.note
                           )
                         }
-                        className="h-9 w-9 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-200"
+                        className="h-9 w-9 rounded-xl bg-muted flex items-center justify-center text-ink"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
@@ -1025,7 +952,7 @@ export function DineInOrderView({
                             item.note
                           )
                         }
-                        className="h-9 w-9 rounded-xl bg-amber-500 text-zinc-950 flex items-center justify-center font-bold"
+                        className="h-9 w-9 rounded-xl bg-amber-500 text-ink flex items-center justify-center font-bold"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
@@ -1039,16 +966,16 @@ export function DineInOrderView({
                       updateNote(item.menu_item_id, e.target.value)
                     }
                     placeholder="Ghi chú cho bếp (VD: ít cay, không hành...)"
-                    className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200"
+                    className="w-full px-3 py-1.5 rounded-lg bg-soft border border-line text-xs text-ink"
                   />
                 </div>
               ))}
             </div>
 
-            <div className="pt-3 border-t border-zinc-800 space-y-3">
+            <div className="pt-3 border-t border-line space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-zinc-400">Tổng lượt gọi này:</span>
-                <span className="text-xl font-black text-amber-400">
+                <span className="text-sm text-muted-ink">Tổng lượt gọi này:</span>
+                <span className="text-xl font-black text-amber-800">
                   {formatVND(totalCartMoney)}
                 </span>
               </div>
@@ -1057,7 +984,7 @@ export function DineInOrderView({
                 type="button"
                 disabled={isSubmitting || cooldownSeconds > 0 || !canOrderMore}
                 onClick={handleSubmitOrder}
-                className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold text-sm flex items-center justify-center gap-2"
+                className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-extrabold text-sm flex items-center justify-center gap-2"
               >
                 <Send className="h-4 w-4" />
                 {isSubmitting
@@ -1075,25 +1002,25 @@ export function DineInOrderView({
       {/* MODAL HIỆN QR CHO BẠN NHẬU CÙNG BÀN QUÉT CHUNG (US-C02) */}
       {/* ==================================================================== */}
       {isShareQrOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-amber-500/40 rounded-3xl max-w-sm w-full p-6 text-center space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-amber-500/40 rounded-3xl max-w-sm w-full p-6 text-center space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-400">
+              <span className="text-xs font-bold text-amber-800">
                 Chia sẻ Phiên gọi món cùng bàn
               </span>
               <button
                 type="button"
                 onClick={() => setIsShareQrOpen(false)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <h3 className="text-xl font-black text-zinc-100">
+            <h3 className="text-xl font-black text-ink">
               {table?.table_number ?? 'Bàn nhậu'}
             </h3>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-ink">
               Đưa mã QR này cho bạn nhậu ngồi cùng bàn quét để cùng chọn mồi và xem tiến độ Bếp!
             </p>
 

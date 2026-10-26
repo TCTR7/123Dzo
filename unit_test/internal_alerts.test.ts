@@ -13,10 +13,10 @@ describe('Targeted in-app notifications', () => {
     expect(staffAlerts(staff, sessions, [ready], tables, now)).toHaveLength(1);
     expect(staffAlerts({ ...staff, id: 'staff2' }, sessions, [ready], tables, now)).toEqual([]);
   });
-  it('includes zone colleagues at two minutes without scheduling a background job', () => {
+  it('includes serving colleagues at two minutes regardless of legacy zone', () => {
     const old = { ...ready, ready_at: new Date(now - 120000).toISOString() };
     expect(staffAlerts({ ...staff, id: 'staff2' }, sessions, [old], tables, now)[0].id).toBe('item1:overdue');
-    expect(staffAlerts({ ...staff, id: 'staff3', assigned_zone_id: 'other-zone' }, sessions, [old], tables, now)).toEqual([]);
+    expect(staffAlerts({ ...staff, id: 'staff3', assigned_zone_id: 'other-zone' }, sessions, [old], tables, now)[0].id).toBe('item1:overdue');
   });
   it('stops reminders when the item was served or the bill was closed', () => {
     expect(staffAlerts(staff, sessions, [{ ...ready, status: 'SERVED' }], tables, now)).toEqual([]);

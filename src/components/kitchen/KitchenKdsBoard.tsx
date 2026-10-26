@@ -50,16 +50,6 @@ interface BatchGroup {
   items: OrderItemRow[];
 }
 
-interface CookingGroup {
-  groupKey: string;
-  isBatched: boolean;
-  batchId: string | null;
-  menuItem: MenuItemRow | undefined;
-  totalQuantity: number;
-  cookingStartedAt: string;
-  items: OrderItemRow[];
-}
-
 interface WakeLockSentinelLike {
   released: boolean;
   release: () => Promise<void>;
@@ -86,7 +76,8 @@ export function KitchenKdsBoard({
   const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [groupSame, setGroupSame] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const wakeLockRef = useRef<WakeLockSentinelLike | null>(null);
 
@@ -134,14 +125,6 @@ export function KitchenKdsBoard({
     };
   }, []);
 
-  // Bộ đếm thời gian thực mỗi giây cho đồng hồ chờ & đồng hồ nấu trên KDS
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const tableMap = useMemo(() => {
     const map = new Map<string, TableRow>();
     tables.forEach((t) => map.set(t.id, t));
@@ -183,8 +166,7 @@ export function KitchenKdsBoard({
 
   // Hàng đợi FIFO (QUEUED) sắp xếp từ cũ nhất đến mới nhất
   const fifoQueuedOrders = useMemo(() => {
-    return validKitchenOrders
-      .filter((item) => item.status === 'QUEUED')
+    return [...validKitchenOrders]
       .sort(
         (a, b) =>
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -195,13 +177,15 @@ export function KitchenKdsBoard({
   const batchGroups = useMemo<BatchGroup[]>(() => {
     const map = new Map<string, OrderItemRow[]>();
     fifoQueuedOrders.forEach((item) => {
-      const list = map.get(item.menu_item_id) ?? [];
+      const key = groupSame ? item.menu_item_id : item.id;
+      const list = map.get(key) ?? [];
       list.push(item);
-      map.set(item.menu_item_id, list);
+      map.set(key, list);
     });
 
     const groups: BatchGroup[] = [];
-    map.forEach((items, menuItemId) => {
+    map.forEach((items) => {
+      const menuItemId = items[0].menu_item_id;
       const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
       const oldestCreatedAt =
         items[0]?.created_at ?? new Date().toISOString();
@@ -214,53 +198,8 @@ export function KitchenKdsBoard({
       });
     });
 
-    // Ưu tiên nhóm có nhiều đĩa hoặc chờ lâu nhất lên đầu
-    return groups.sort((a, b) => {
-      if (b.items.length !== a.items.length) {
-        return b.items.length - a.items.length;
-      }
-      return (
-        new Date(a.oldestCreatedAt).getTime() -
-        new Date(b.oldestCreatedAt).getTime()
-      );
-    });
-  }, [fifoQueuedOrders, menuMap]);
-
-  // Các mẻ / món đang nấu (status === 'COOKING')
-  const cookingGroups = useMemo<CookingGroup[]>(() => {
-    const cookingItems = validKitchenOrders.filter(
-      (i) => i.status === 'COOKING'
-    );
-    const map = new Map<string, OrderItemRow[]>();
-
-    cookingItems.forEach((item) => {
-      const key = item.batch_id ? `batch_${item.batch_id}` : `single_${item.id}`;
-      const list = map.get(key) ?? [];
-      list.push(item);
-      map.set(key, list);
-    });
-
-    const groups: CookingGroup[] = [];
-    map.forEach((items, groupKey) => {
-      const first = items[0];
-      if (!first) return;
-      groups.push({
-        groupKey,
-        isBatched: Boolean(first.batch_id) && items.length > 1,
-        batchId: first.batch_id,
-        menuItem: menuMap.get(first.menu_item_id),
-        totalQuantity: items.reduce((sum, i) => sum + i.quantity, 0),
-        cookingStartedAt: first.cooking_started_at ?? first.created_at,
-        items,
-      });
-    });
-
-    return groups.sort(
-      (a, b) =>
-        new Date(a.cookingStartedAt).getTime() -
-        new Date(b.cookingStartedAt).getTime()
-    );
-  }, [validKitchenOrders, menuMap]);
+    return groups.sort((a,b) => Date.parse(a.oldestCreatedAt) - Date.parse(b.oldestCreatedAt));
+  }, [fifoQueuedOrders, menuMap, groupSame]);
 
   function getSessionTableLabel(sessionId: string): string {
     const sess = sessionMap.get(sessionId);
@@ -277,54 +216,6 @@ export function KitchenKdsBoard({
   // ==========================================================================
   // 3. BẤM "NẤU GỘP CẢ MẺ" (BATCH COOKING) HOẶC "NHẬN NẤU ĐƠN LẺ"
   // Bắt buộc ghi nhận cooking_started_at và batch_id (nếu nấu gộp) (Mục 3.3 AGENTS.md)
-  // ==========================================================================
-  async function handleStartCooking(
-    targetItems: OrderItemRow[],
-    isBatch: boolean
-  ) {
-    if (isSubmitting || targetItems.length === 0) return;
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    const nowIso = new Date().toISOString();
-    const sharedBatchId =
-      isBatch && targetItems.length > 1 ? crypto.randomUUID() : null;
-    const itemIds = targetItems.map((i) => i.id);
-
-    try {
-      const { data, error } = await supabase
-        .from('order_items')
-        .update({
-          status: 'COOKING',
-          cooking_started_at: nowIso,
-          batch_id: sharedBatchId,
-        })
-        .in('id', itemIds)
-        .select('*');
-
-      if (error || !data) {
-        throw new Error(
-          error?.message ?? 'Không thể chuyển trạng thái sang COOKING'
-        );
-      }
-
-      const updatedMap = new Map<string, OrderItemRow>();
-      data.forEach((d) => updatedMap.set(d.id, d));
-
-      setOrders((prev) =>
-        prev.map((item) => updatedMap.get(item.id) ?? item)
-      );
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Lỗi khi bắt đầu nấu món'
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  // ==========================================================================
-  // 4. BẤM "HOÀN THÀNH" (CHUYỂN SANG READY, GHI READY_AT & BẮN WEB PUSH CHO NV)
   // ==========================================================================
   async function handleCompleteCooking(targetItems: OrderItemRow[]) {
     if (isSubmitting || targetItems.length === 0) return;
@@ -346,7 +237,7 @@ export function KitchenKdsBoard({
 
       if (error || !data) {
         throw new Error(
-          error?.message ?? 'Không thể hoàn thành món sang trạng thái READY'
+          error?.message ?? 'Chưa báo xong món được. Hãy thử lại.'
         );
       }
 
@@ -366,6 +257,7 @@ export function KitchenKdsBoard({
   // 5. BÁO HẾT MÓN NHANH (86ING) NGAY TRÊN MÀN HÌNH BẾP (US-K03)
   // ==========================================================================
   async function handleToggle86MenuItem(menuItem: MenuItemRow) {
+    if (togglingId) return; setTogglingId(menuItem.id);
     setErrorMessage(null);
     try {
       const { data, error } = await supabase
@@ -377,7 +269,7 @@ export function KitchenKdsBoard({
 
       if (error || !data) {
         throw new Error(
-          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng (86ing)'
+          error?.message ?? 'Không thể cập nhật trạng thái Tạm hết hàng'
         );
       }
 
@@ -388,7 +280,7 @@ export function KitchenKdsBoard({
       setErrorMessage(
         err instanceof Error ? err.message : 'Lỗi khi báo hết món'
       );
-    }
+    } finally { setTogglingId(null); }
   }
 
   const outOfStockCount = useMemo(
@@ -397,42 +289,41 @@ export function KitchenKdsBoard({
   );
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-4 lg:p-6 flex flex-col gap-5">
+    <div className="min-h-screen bg-soft text-ink p-4 lg:p-6 flex flex-col gap-5">
       {/* Top Header KDS Tablet */}
-      <div role="status" className="border-b border-zinc-800 px-4 py-2 text-sm text-amber-300">
+      <div role="status" className="border-b border-line px-4 py-2 text-sm text-amber-800">
         {live.connected ? 'Đã kết nối thông báo nội bộ' : 'Đang kết nối lại thông báo...'}
         {live.alerts.length > 0 && <span> - {live.alerts[0].message} ({live.alerts.length})</span>}
       </div>
-      <header className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+      <header className="bg-surface border border-line rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-2xl bg-orange-500/15 border border-orange-500/40 flex items-center justify-center text-orange-400">
+          <div className="h-12 w-12 rounded-2xl bg-orange-500/15 border border-orange-500/40 flex items-center justify-center text-orange-800">
             <ChefHat className="h-7 w-7" />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-xl font-black text-zinc-100">
-                123Dzô • Màn hình Điều phối Bếp (KDS Tablet)
+              <h1 className="text-xl font-black text-ink">
+                123Dzô • Bếp
               </h1>
-              <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-orange-500/15 text-orange-300 border border-orange-500/30">
-                Role: {currentStaffRole}
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-orange-500/15 text-orange-800 border border-orange-500/30">
+                {currentStaffRole === 'kitchen' ? 'Đầu bếp' : currentStaffRole === 'admin' ? 'Chủ quán' : 'Người bàn giao'}
               </span>
               <span
                 className={cn(
                   'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border',
                   isWakeLockActive
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                    : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                    ? 'bg-emerald-500/15 text-emerald-800 border-emerald-500/30'
+                    : 'bg-muted text-muted-ink border-line'
                 )}
               >
                 <Sun className="h-3.5 w-3.5" />
                 {isWakeLockActive
-                  ? 'Wake Lock: Giữ sáng màn hình'
-                  : 'Wake Lock: Chờ kích hoạt'}
+                  ? 'Đang giữ sáng màn hình'
+                  : 'Giữ màn hình mở khi làm việc'}
               </span>
             </div>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Đang chờ nấu: <strong>{fifoQueuedOrders.length} lượt</strong> •
-              Đang đứng bếp: <strong>{cookingGroups.length} mẻ</strong>
+            <p className="text-xs text-muted-ink mt-0.5">
+              <strong>{fifoQueuedOrders.length} lượt món cần làm</strong> · Xong món nào, bấm xong món đó.
             </p>
           </div>
         </div>
@@ -441,19 +332,19 @@ export function KitchenKdsBoard({
           <button
             type="button"
             onClick={() => void playNotificationSound('/sounds/ting-ting.mp3')}
-            className="min-h-12 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 border border-zinc-700"
+            className="min-h-12 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-muted hover:bg-stone-200 text-xs font-semibold text-ink border border-line"
           >
-            <Volume2 className="h-4 w-4 text-amber-400" />
+            <Volume2 className="h-4 w-4 text-amber-800" />
             Thử chuông Bếp
           </button>
 
           <button
             type="button"
             onClick={() => setIs86DrawerOpen(true)}
-            className="min-h-12 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/40 text-xs font-bold"
+            className="min-h-12 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-800 border border-red-500/40 text-xs font-bold"
           >
             <Ban className="h-4 w-4" />
-            Báo hết món nhanh (86ing)
+            Báo hết món nhanh
             {outOfStockCount > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[11px]">
                 {outOfStockCount}
@@ -465,23 +356,23 @@ export function KitchenKdsBoard({
             <>
               <Link
                 href="/admin"
-                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition-colors"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-800 transition-colors"
               >
-                <BarChart3 className="h-4 w-4 text-amber-400" />
-                Về Quản Trị (/admin)
+                <BarChart3 className="h-4 w-4 text-amber-800" />
+                Quản lý quán
               </Link>
               <Link
                 href="/staff"
-                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-emerald-300 transition-colors"
+                className="min-h-12 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-muted hover:bg-stone-200 border border-line text-xs font-semibold text-emerald-800 transition-colors"
               >
-                <LayoutGrid className="h-4 w-4 text-emerald-400" />
-                Phục vụ Bàn (/staff)
+                <LayoutGrid className="h-4 w-4 text-emerald-800" />
+                Phục vụ bàn
               </Link>
             </>
           )}
 
           <div className="pl-1 flex items-center">
-            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-400">Bàn giao hệ thống</Link>}
+            {currentStaffRole === 'operator' && <Link href="/operator" className="min-h-12 flex items-center px-3 text-xs text-amber-800">Bàn giao hệ thống</Link>}
             <OnboardingGuideModal role={currentStaffRole} />
             <UserButton />
           </div>
@@ -489,12 +380,12 @@ export function KitchenKdsBoard({
       </header>
 
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="p-4 rounded-xl bg-red-50/70 border border-red-500/50 text-red-800 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
             onClick={() => setErrorMessage(null)}
-            className="text-red-300 hover:text-white"
+            className="text-red-800 hover:text-ink"
           >
             <X className="h-5 w-5" />
           </button>
@@ -504,349 +395,47 @@ export function KitchenKdsBoard({
       {/* ==================================================================== */}
       {/* BỐ CỤC 2 CỘT LỚN CHO MÀN HÌNH NGANG TABLET (MỤC 13.3 PRD_SPEC.MD) */}
       {/* ==================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-        {/* CỘT TRÁI (5/12): GOM MÓN TRÙNG - BATCH COOKING VIEW (US-K01) */}
-        <section className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-amber-400" />
-              <div>
-                <h2 className="text-base font-extrabold text-zinc-100">
-                  Cột 1: Gom Món Trùng (Batch Cooking)
-                </h2>
-                <p className="text-xs text-zinc-400">
-                  Gom các đĩa giống nhau của nhiều bàn để xào/nấu chung 1 lần chảo
-                </p>
-              </div>
-            </div>
-            <span className="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 text-xs font-bold">
-              {batchGroups.length} nhóm món
-            </span>
-          </div>
+      <section className="neu-card p-5 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="eyebrow">LÀM MÓN THẬT NHẸ NHÀNG</p><h2 className="mt-2 text-2xl font-bold">Món cần làm</h2><p className="mt-2 text-muted-ink">Món gọi trước nằm trên. Xem ghi chú của từng bàn trước khi làm.</p></div><label className="neu-button flex min-h-12 items-center gap-3 px-4"><input type="checkbox" checked={groupSame} onChange={e => setGroupSame(e.target.checked)} />Gộp món giống nhau</label></div>
+        {!batchGroups.length ? <p className="py-16 text-center text-muted-ink">Đã xong hết món. Có món mới sẽ tự hiện ở đây.</p> :
+          <div className="grid gap-4 xl:grid-cols-2">{batchGroups.map((g,index) => <article key={g.items[0].id} className={'neu-card p-5 space-y-4 ' + (index === 0 ? 'tone-peach ring-1 ring-orange-300' : '')}>
+            <div className="flex items-center gap-3"><span className="neu-inset flex h-11 w-11 shrink-0 items-center justify-center rounded-xl font-bold text-teal-800">#{index + 1}</span><h3 className="text-xl font-bold">{g.totalQuantity} × {g.menuItem?.name ?? 'Món ăn'}</h3></div>
+            <ul className="space-y-2">{g.items.map(item => <li key={item.id} className="neu-inset flex flex-wrap items-center justify-between gap-3 rounded-xl p-3"><div><strong>{getSessionTableLabel(item.session_id)} · {item.quantity} phần</strong>{item.note && <p className="mt-1 font-semibold text-orange-800">Ghi chú: {item.note}</p>}</div>{g.items.length > 1 && <button disabled={isSubmitting} onClick={() => void handleCompleteCooking([item])} className="neu-button min-h-12 px-4 text-sm">Xong phần này</button>}</li>)}</ul>
+            <button disabled={isSubmitting} onClick={() => void handleCompleteCooking(g.items)} className="neu-button min-h-14 w-full bg-teal-700 px-5 py-4 text-lg font-bold text-white">{isSubmitting ? 'Đang lưu…' : g.items.length > 1 ? 'Xong tất cả phần này' : 'Xong món'}</button>
+          </article>)}</div>}
+      </section>
 
-          <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-230px)] pr-1">
-            {batchGroups.length === 0 ? (
-              <div className="py-16 text-center text-sm text-zinc-500">
-                Hiện không có món nào đang chờ trong hàng đợi.
-              </div>
-            ) : (
-              batchGroups.map((group) => {
-                const isMultiTableBatch = group.items.length > 1;
-                const waitSeconds = Math.max(
-                  0,
-                  Math.floor(
-                    (nowMs - new Date(group.oldestCreatedAt).getTime()) / 1000
-                  )
-                );
-
-                return (
-                  <div
-                    key={group.menuItemId}
-                    className={cn(
-                      'p-4 rounded-2xl border space-y-3 transition-all',
-                      isMultiTableBatch
-                        ? 'bg-amber-500/10 border-amber-500/50'
-                        : 'bg-zinc-950 border-zinc-800'
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        {isMultiTableBatch && (
-                          <span className="inline-block px-2 py-0.5 rounded bg-amber-500 text-zinc-950 text-[11px] font-black mb-1">
-                            GOM {group.items.length} LƯỢT GỌI CÙNG MÓN
-                          </span>
-                        )}
-                        <h3 className="text-lg font-black text-zinc-100">
-                          {group.menuItem?.name ?? 'Món nấu'} • Tổng:{' '}
-                          <span className="text-amber-400">
-                            {group.totalQuantity} phần
-                          </span>
-                        </h3>
-                      </div>
-
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-300 shrink-0">
-                        <Clock className="h-3.5 w-3.5 text-amber-400" />
-                        Chờ {formatDurationFromSeconds(waitSeconds)}
-                      </span>
-                    </div>
-
-                    {/* Chi tiết từng bàn trong mẻ gom */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {group.items.map((item) => (
-                        <div
-                          key={item.id}
-                          className="px-2.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs"
-                        >
-                          <span className="font-bold text-amber-300">
-                            {getSessionTableLabel(item.session_id)}
-                          </span>
-                          <span className="text-zinc-200 font-semibold">
-                            {' '}
-                            × {item.quantity}
-                          </span>
-                          {item.note && (
-                            <span className="block text-[11px] text-orange-300">
-                              Ghi chú: {item.note}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() =>
-                        handleStartCooking(group.items, isMultiTableBatch)
-                      }
-                      className={cn(
-                        'min-h-12 w-full py-3 px-4 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99]',
-                        isMultiTableBatch
-                          ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-lg'
-                          : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-700'
-                      )}
-                    >
-                      <Flame className="h-4 w-4" />
-                      {isMultiTableBatch
-                        ? `Nấu gộp cả ${group.totalQuantity} phần (${group.items.length} bàn)`
-                        : `Nhận nấu (${group.totalQuantity} phần)`}
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        {/* CỘT PHẢI (7/12): CÁC MẺ ĐANG NẤU (COOKING) & HÀNG ĐỢI THỨ TỰ THỜI GIAN (FIFO) */}
-        <section className="lg:col-span-7 flex flex-col gap-5">
-          {/* KHU VỰC 2A: CÁC MÓN / MẺ ĐANG ĐỨNG BẾP (STATUS === 'COOKING') */}
-          <div className="bg-zinc-900 border border-orange-500/40 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Flame className="h-5 w-5 text-orange-400 animate-pulse" />
-                <h2 className="text-base font-extrabold text-zinc-100">
-                  Đang Chế Biến Trên Bếp ({cookingGroups.length})
-                </h2>
-              </div>
-              <span className="text-xs text-zinc-400">
-                Bấm &ldquo;Hoàn thành&rdquo; để báo nhân viên bưng ra bàn
-              </span>
-            </div>
-
-            {cookingGroups.length === 0 ? (
-              <div className="py-8 text-center text-xs text-zinc-500">
-                Chưa có món nào đang trên chảo. Hãy bấm &ldquo;Nấu gộp&rdquo; hoặc &ldquo;Nhận nấu&rdquo; để bắt đầu tính giờ!
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {cookingGroups.map((cg) => {
-                  const prepMinutes = cg.menuItem?.prep_time_minutes ?? 10;
-                  const elapsedCookSeconds = Math.max(
-                    0,
-                    Math.floor(
-                      (nowMs - new Date(cg.cookingStartedAt).getTime()) / 1000
-                    )
-                  );
-                  const isLate = elapsedCookSeconds > prepMinutes * 60 * 1.3;
-
-                  return (
-                    <div
-                      key={cg.groupKey}
-                      className={cn(
-                        'p-4 rounded-2xl border flex flex-col justify-between gap-3',
-                        isLate
-                          ? 'bg-red-950/35 border-red-500/60'
-                          : 'bg-zinc-950 border-orange-500/40'
-                      )}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            {cg.isBatched && (
-                              <span className="inline-block px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 text-[10px] font-bold mb-1">
-                                MẺ NẤU GỘP ({cg.items.length} BÀN)
-                              </span>
-                            )}
-                            <h3 className="text-base font-black text-zinc-100">
-                              {cg.totalQuantity}x{' '}
-                              {cg.menuItem?.name ?? 'Món đang nấu'}
-                            </h3>
-                          </div>
-
-                          <div className="text-right">
-                            <span
-                              className={cn(
-                                'font-mono text-sm font-black px-2.5 py-1 rounded-lg border inline-flex items-center gap-1',
-                                isLate
-                                  ? 'bg-red-500/20 text-red-300 border-red-500/40'
-                                  : 'bg-orange-500/15 text-orange-300 border-orange-500/30'
-                              )}
-                            >
-                              <Clock className="h-3.5 w-3.5" />
-                              {formatDurationFromSeconds(elapsedCookSeconds)}
-                            </span>
-                            <span className="block text-[10px] text-zinc-400 mt-1">
-                              Chuẩn: {prepMinutes} phút
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5">
-                          {cg.items.map((item) => (
-                            <span
-                              key={item.id}
-                              className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200"
-                            >
-                              <strong className="text-amber-400">
-                                {getSessionTableLabel(item.session_id)}
-                              </strong>{' '}
-                              ({item.quantity})
-                              {item.note ? ` • ${item.note}` : ''}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={isSubmitting}
-                        onClick={() => handleCompleteCooking(cg.items)}
-                        className="min-h-12 w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Hoàn thành • Báo NV Bưng Ngay
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* KHU VỰC 2B: HÀNG ĐỢI THỨ TỰ THỜI GIAN (FIFO QUEUE - QUEUED) */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3 flex-1">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-amber-400" />
-                <div>
-                  <h2 className="text-base font-extrabold text-zinc-100">
-                    Cột 2: Hàng Đợi Thứ Tự Gọi Món (FIFO Queue)
-                  </h2>
-                  <p className="text-xs text-zinc-400">
-                    Bàn nào đặt trước xếp trên (Khớp 100% với số thứ tự chờ trên máy khách)
-                  </p>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 text-xs font-bold">
-                {fifoQueuedOrders.length} đơn chờ
-              </span>
-            </div>
-
-            <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
-              {fifoQueuedOrders.length === 0 ? (
-                <div className="py-10 text-center text-xs text-zinc-500">
-                  Hàng đợi FIFO đang trống.
-                </div>
-              ) : (
-                fifoQueuedOrders.map((item, idx) => {
-                  const menu = menuMap.get(item.menu_item_id);
-                  const waitSeconds = Math.max(
-                    0,
-                    Math.floor(
-                      (nowMs - new Date(item.created_at).getTime()) / 1000
-                    )
-                  );
-                  const isWaitingLong = waitSeconds > 10 * 60;
-
-                  return (
-                    <div
-                      key={item.id}
-                      className={cn(
-                        'p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3',
-                        isWaitingLong
-                          ? 'bg-red-950/30 border-red-500/40'
-                          : 'bg-zinc-950 border-zinc-800'
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center font-black text-amber-400 text-sm shrink-0">
-                          #{idx + 1}
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded bg-zinc-800 text-amber-300 text-xs font-bold">
-                              {getSessionTableLabel(item.session_id)}
-                            </span>
-                            <span className="font-extrabold text-sm text-zinc-100">
-                              {item.quantity}x {menu?.name ?? 'Món ăn'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-zinc-400 mt-1">
-                            <span>
-                              Đã chờ: {formatDurationFromSeconds(waitSeconds)}
-                            </span>
-                            {item.note && (
-                              <span className="text-orange-300 font-medium">
-                                • Ghi chú: {item.note}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={isSubmitting}
-                        onClick={() => handleStartCooking([item], false)}
-                        className="min-h-12 px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-zinc-950 font-extrabold text-xs shrink-0"
-                      >
-                        Nhận nấu đơn lẻ
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* ==================================================================== */}
-      {/* DRAWER BÁO HẾT MÓN NHANH (86ING - US-K03) */}
-      {/* ==================================================================== */}
       {is86DrawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex justify-end">
-          <div className="bg-zinc-900 border-l border-zinc-800 max-w-md w-full h-full p-5 flex flex-col gap-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-slate-900/35 flex justify-end">
+          <div className="bg-surface border-l border-line max-w-md w-full h-full p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-red-400" />
-                <h3 className="text-lg font-extrabold text-zinc-100">
-                  Báo hết món nhanh (86ing)
+                <AlertTriangle className="h-5 w-5 text-red-800" />
+                <h3 className="text-lg font-extrabold text-ink">
+                  Báo hết món nhanh
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setIs86DrawerOpen(false)}
-                className="p-1 text-zinc-400 hover:text-white"
+                className="p-1 text-muted-ink hover:text-ink"
               >
                 <X className="h-6 w-6" />
               </button>
             </div>
 
             <div className="relative">
-              <Search className="h-4 w-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="h-4 w-4 text-muted-ink absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={drawerSearch}
                 onChange={(e) => setDrawerSearch(e.target.value)}
                 placeholder="Tìm món cần khóa / mở bán..."
-                className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800 pr-1">
+            <div className="flex-1 overflow-y-auto divide-y divide-line pr-1">
               {menuItems
                 .filter((m) =>
                   m.name.toLowerCase().includes(drawerSearch.toLowerCase())
@@ -857,25 +446,26 @@ export function KitchenKdsBoard({
                     className="py-3 flex items-center justify-between gap-3"
                   >
                     <div>
-                      <div className="font-bold text-sm text-zinc-100">
+                      <div className="font-bold text-sm text-ink">
                         {m.name}
                       </div>
-                      <span className="text-xs text-zinc-400">
+                      <span className="text-xs text-muted-ink">
                         {m.station === 'KITCHEN' ? 'Món Bếp' : 'Quầy / Bia'}
                       </span>
                     </div>
 
                     <button
                       type="button"
+                      disabled={Boolean(togglingId)}
                       onClick={() => handleToggle86MenuItem(m)}
                       className={cn(
                         'min-h-12 px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors',
                         m.is_available
-                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                          : 'bg-red-500/20 text-red-300 border-red-500/40'
+                          ? 'bg-emerald-500/15 text-emerald-800 border-emerald-500/30'
+                          : 'bg-red-500/20 text-red-800 border-red-500/40'
                       )}
                     >
-                      {m.is_available ? 'Đang còn hàng' : 'ĐÃ KHÓA (86)'}
+                      {m.is_available ? 'Đang còn hàng' : 'Tạm hết món'}
                     </button>
                   </div>
                 ))}

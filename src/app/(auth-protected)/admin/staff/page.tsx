@@ -8,12 +8,8 @@ export default async function AdminStaffPage() {
   const profile = await requireStaffRole(['operator', 'admin']);
   const supabase = await createSupabaseServerClient();
 
-  const [zonesResult, tablesResult, staffResult, sessionsResult] =
+  const [tablesResult, staffResult, sessionsResult] =
     await Promise.all([
-      supabase
-        .from('zones')
-        .select('id, name, created_at')
-        .order('created_at', { ascending: true }),
       supabase
         .from('tables')
         .select('id, table_number, zone_id, status, current_session_id')
@@ -35,7 +31,6 @@ export default async function AdminStaffPage() {
   return (
     <StaffAndTableManager
       currentStaffRole={profile.role}
-      initialZones={zonesResult.data ?? []}
       initialTables={tablesResult.data ?? []}
       initialStaff={staffResult.data ?? []}
       initialActiveSessions={sessionsResult.data ?? []}

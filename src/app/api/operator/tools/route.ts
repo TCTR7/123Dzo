@@ -29,13 +29,13 @@ export async function POST(req: Request) {
       if (tables.count || menu.count) return NextResponse.json({ error: 'Chỉ tạo mẫu khi quán chưa có bàn và món. Dữ liệu hiện tại được giữ nguyên.' }, { status: 409 });
       let sampleZones = zones.data ?? [];
       if (sampleZones.length === 0) {
-        const result = await db.from('zones').insert([{ name: 'Sân vườn' }, { name: 'Trong nhà' }]).select('id, name');
+        const result = await db.from('zones').insert([{ name: 'Quán' }]).select('id, name');
         if (result.error || !result.data) throw new Error('Không tạo được khu vực mẫu.');
         sampleZones = result.data;
       }
       const result = await db.from('tables').insert(Array.from({ length: 6 }, (_, index) => ({
-        table_number: `Bàn ${String(index + 1).padStart(2, '0')}`,
-        zone_id: sampleZones[Math.floor(index / 3) % sampleZones.length].id,
+        table_number: `Bàn ${String(index + 1)}`,
+        zone_id: sampleZones[0].id,
         status: 'AVAILABLE' as const,
       }))).select('id');
       if (result.error) throw new Error('Không tạo được bàn mẫu.');
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
         const rollback = await db.from('tables').delete().in('id', (result.data ?? []).map((table) => table.id));
         throw new Error(rollback.error ? 'Chưa tạo được menu; bàn mẫu đã được lưu. Kiểm tra Bàn & Nhân sự trước khi thử lại.' : 'Không tạo được menu mẫu. Vui lòng thử lại.');
       }
-      return NextResponse.json({ success: true, message: 'Đã tạo 6 bàn và 6 món mẫu trong các khu vực của quán.' });
+      return NextResponse.json({ success: true, message: 'Đã tạo 6 bàn và 6 món mẫu cho quán.' });
     }
     if (input.action === 'reset' && input.confirmation === 'XOA HOA DON TEST') {
       // Session deletion cascades to order_items and clears table session references.
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       if (sessions.error) throw new Error('Chưa xóa được hóa đơn test. Vui lòng thử lại.');
       const tables = await db.from('tables').update({ status: 'AVAILABLE', current_session_id: null }).not('id', 'is', null);
       if (tables.error) throw new Error('Đã xóa hóa đơn nhưng chưa trả trạng thái bàn. Bấm reset lại để hoàn tất.');
-      return NextResponse.json({ success: true, message: 'Đã xóa toàn bộ hóa đơn và món gọi, trả bàn về trống. Thực đơn, khu vực, nhân sự và kho được giữ nguyên.' });
+      return NextResponse.json({ success: true, message: 'Đã xóa toàn bộ hóa đơn và món gọi, trả bàn về trống. Thực đơn, nhân sự và kho được giữ nguyên.' });
     }
     return NextResponse.json({ error: 'Thao tác hoặc xác nhận không hợp lệ.' }, { status: 400 });
   } catch (error) {

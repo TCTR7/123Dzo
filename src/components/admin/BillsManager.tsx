@@ -1,4 +1,6 @@
 'use client';
+import { orderStatusLabel, sessionStatusLabel } from '@/lib/ui-labels';
+import { OPEN_PAYMENT_SETUP } from './PaymentSetupModal';
 
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -193,7 +195,7 @@ export function BillsManager({
     const trimmedReason = cancelReason.trim();
     if (!trimmedReason) {
       setErrorMessage(
-        'Admin hủy món bắt buộc phải nhập lý do hủy (cancel_reason).'
+        'Vui lòng nhập lý do hủy món.'
       );
       return;
     }
@@ -382,20 +384,21 @@ export function BillsManager({
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end print:hidden"><button onClick={() => window.dispatchEvent(new Event(OPEN_PAYMENT_SETUP))} className="neu-button px-4 py-3 text-sm font-bold">Thiết lập nhận tiền</button></div>
       {/* Header không in */}
       <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-zinc-100">
-            Thu ngân, Quản lý Hóa đơn &amp; In Bill Nhiệt K80
+          <h2 className="text-2xl font-extrabold text-ink">
+            Thu ngân & Hóa đơn
           </h2>
-          <p className="text-sm text-zinc-400 mt-1">
-            Chủ quán xác nhận chuyển khoản đơn mang về (`PENDING_PAYMENT`), chốt bill tại bàn (`REQUEST_BILL`) và in hóa đơn nhiệt khổ 80mm.
+          <p className="text-sm text-muted-ink mt-1">
+            Nhận tiền chuyển khoản, thanh toán bàn và in hóa đơn.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {pendingTakeawayCount > 0 && (
-            <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500 text-amber-300 text-xs font-extrabold animate-pulse">
+            <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500 text-amber-800 text-xs font-extrabold animate-pulse">
               <ShoppingBag className="h-4 w-4" />
               Có {pendingTakeawayCount} đơn mang về chờ duyệt chuyển khoản!
             </div>
@@ -411,7 +414,7 @@ export function BillsManager({
       </div>
 
       {errorMessage && (
-        <div className="print:hidden p-3.5 rounded-xl bg-red-950/70 border border-red-500/50 text-red-200 text-sm flex items-center justify-between">
+        <div className="print:hidden p-3.5 rounded-xl bg-red-50/70 border border-red-500/50 text-red-800 text-sm flex items-center justify-between">
           <span>{errorMessage}</span>
           <button
             type="button"
@@ -427,7 +430,7 @@ export function BillsManager({
       <div className="print:block grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Cột trái: Danh sách hóa đơn */}
         <div className="print:hidden lg:col-span-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 p-3 rounded-2xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-surface border border-line p-3 rounded-2xl">
             <div className="flex gap-1.5">
               <button
                 type="button"
@@ -435,8 +438,8 @@ export function BillsManager({
                 className={cn(
                   'px-3.5 py-2 rounded-xl text-xs font-bold transition-colors',
                   tabFilter === 'OPEN'
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-950 text-zinc-400'
+                    ? 'bg-amber-500 text-ink'
+                    : 'bg-soft text-muted-ink'
                 )}
               >
                 Đang mở / Chờ thanh toán
@@ -447,29 +450,29 @@ export function BillsManager({
                 className={cn(
                   'px-3.5 py-2 rounded-xl text-xs font-bold transition-colors',
                   tabFilter === 'CLOSED'
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'bg-zinc-950 text-zinc-400'
+                    ? 'bg-amber-500 text-ink'
+                    : 'bg-soft text-muted-ink'
                 )}
               >
-                Lịch sử đã đóng (CLOSED)
+                Hóa đơn đã thanh toán
               </button>
             </div>
 
             <div className="relative flex-1">
-              <Search className="h-4 w-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="h-4 w-4 text-muted-ink absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Tìm số bàn, mã CK (DZO...), SĐT..."
-                className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-100"
+                className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-soft border border-line text-xs text-ink"
               />
             </div>
           </div>
 
           <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
             {filteredSessions.length === 0 ? (
-              <div className="py-12 text-center bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-500 text-sm">
+              <div className="py-12 text-center bg-surface border border-line rounded-2xl text-muted-ink text-sm">
                 Không có hóa đơn nào trong mục này.
               </div>
             ) : (
@@ -497,14 +500,14 @@ export function BillsManager({
                       isRequestBill
                         ? 'bg-rose-950/35 border-rose-500/70'
                         : isPendingTakeaway
-                        ? 'bg-amber-950/35 border-amber-500/70'
-                        : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700',
+                        ? 'bg-amber-50/35 border-amber-500/70'
+                        : 'bg-surface border-line hover:border-line',
                       isSelected ? 'ring-2 ring-amber-400' : ''
                     )}
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-base text-zinc-100">
+                        <span className="font-extrabold text-base text-ink">
                           {getSessionTitle(sess)}
                         </span>
                         <span
@@ -513,12 +516,12 @@ export function BillsManager({
                             sess.status === 'REQUEST_BILL'
                               ? 'bg-rose-500 text-white animate-pulse'
                               : isPendingTakeaway
-                              ? 'bg-amber-500 text-zinc-950 animate-pulse'
+                              ? 'bg-amber-500 text-ink animate-pulse'
                               : sess.status === 'ACTIVE'
-                              ? 'bg-emerald-500/20 text-emerald-300'
+                              ? 'bg-emerald-500/20 text-emerald-800'
                               : sess.status === 'CLOSED'
-                              ? 'bg-zinc-800 text-zinc-300'
-                              : 'bg-amber-500/20 text-amber-300'
+                              ? 'bg-muted text-ink'
+                              : 'bg-amber-500/20 text-amber-800'
                           )}
                         >
                           {sess.status === 'REQUEST_BILL'
@@ -528,11 +531,11 @@ export function BillsManager({
                             : sess.status === 'ACTIVE' &&
                               sess.session_type === 'TAKEAWAY'
                             ? 'ĐÃ DUYỆT CK • BẾP ĐANG NẤU'
-                            : sess.status}
+                            : sessionStatusLabel[sess.status]}
                         </span>
                       </div>
 
-                      <div className="text-xs text-zinc-400 flex flex-wrap items-center gap-2">
+                      <div className="text-xs text-muted-ink flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           {new Date(sess.opened_at).toLocaleString('vi-VN')}
@@ -540,7 +543,7 @@ export function BillsManager({
                         {sess.payment_code && (
                           <span>
                             • Nội dung CK:{' '}
-                            <strong className="text-amber-300 font-mono">
+                            <strong className="text-amber-800 font-mono">
                               {sess.payment_code}
                             </strong>
                           </span>
@@ -553,10 +556,10 @@ export function BillsManager({
                     </div>
 
                     <div className="text-right">
-                      <div className="text-lg font-black text-amber-400">
+                      <div className="text-lg font-black text-amber-800">
                         {formatVND(sess.total_amount)}
                       </div>
-                      <span className="text-[11px] text-zinc-400">
+                      <span className="text-[11px] text-muted-ink">
                         {sess.payment_method ?? 'Chưa chọn PTTT'}
                       </span>
                     </div>
@@ -570,29 +573,29 @@ export function BillsManager({
         {/* Cột phải: Chi tiết đối soát & Mẫu In Nhiệt K80 */}
         <div className="lg:col-span-6 space-y-4">
           {!selectedSession ? (
-            <div className="print:hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center text-zinc-500 text-sm">
-              Chọn một hóa đơn bên trái để đối soát, in bill nhiệt K80 và đóng phiên bàn.
+            <div className="print:hidden bg-surface border border-line rounded-2xl p-12 text-center text-muted-ink text-sm">
+              Chọn hóa đơn để xem món, thanh toán và in.
             </div>
           ) : (
             <>
               {/* Bảng điều khiển Thu ngân (Ẩn khi in) */}
-              <div className="print:hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="print:hidden bg-surface border border-line rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-line pb-3">
                   <div>
-                    <span className="text-xs text-amber-400 font-bold">
+                    <span className="text-xs text-amber-800 font-bold">
                       Chi tiết thu ngân &amp; kiểm soát món
                     </span>
-                    <h3 className="text-xl font-black text-zinc-100">
+                    <h3 className="text-xl font-black text-ink">
                       {getSessionTitle(selectedSession)}
                     </h3>
                     {selectedSession.session_type === 'TAKEAWAY' && (
-                      <p className="text-xs text-zinc-400 mt-1">
+                      <p className="text-xs text-muted-ink mt-1">
                         SĐT khách:{' '}
-                        <strong className="text-zinc-200">
+                        <strong className="text-ink">
                           {selectedSession.customer_phone ?? '—'}
                         </strong>{' '}
                         • Nội dung CK:{' '}
-                        <code className="px-1.5 py-0.5 rounded bg-zinc-950 text-emerald-400 font-bold">
+                        <code className="px-1.5 py-0.5 rounded bg-soft text-emerald-800 font-bold">
                           {selectedSession.payment_code ??
                             selectedSession.session_token}
                         </code>
@@ -608,8 +611,8 @@ export function BillsManager({
                         className={cn(
                           'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border',
                           selectedPaymentMethod === 'CASH'
-                            ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                            : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+                            ? 'bg-amber-500 text-ink border-amber-500'
+                            : 'bg-soft text-muted-ink border-line'
                         )}
                       >
                         <Banknote className="h-4 w-4" />
@@ -621,8 +624,8 @@ export function BillsManager({
                         className={cn(
                           'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border',
                           selectedPaymentMethod === 'VIETQR'
-                            ? 'bg-amber-500 text-zinc-950 border-amber-500'
-                            : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+                            ? 'bg-amber-500 text-ink border-amber-500'
+                            : 'bg-soft text-muted-ink border-line'
                         )}
                       >
                         <CreditCard className="h-4 w-4" />
@@ -636,25 +639,25 @@ export function BillsManager({
                 {selectedSession.session_type === 'TAKEAWAY' &&
                   selectedSession.status === 'PENDING_PAYMENT' && (
                     <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 space-y-3">
-                      <div className="text-xs text-amber-200 leading-relaxed">
-                        <strong className="text-amber-300 block text-sm mb-0.5">
+                      <div className="text-xs text-amber-800 leading-relaxed">
+                        <strong className="text-amber-800 block text-sm mb-0.5">
                           Đơn đặt mang về từ xa đang chờ Chủ quán xác nhận chuyển khoản
                         </strong>
                         Kiểm tra tài khoản ngân hàng xem đã nhận đủ{' '}
                         <strong>{formatVND(calculatedBillTotal)}</strong> với nội
                         dung{' '}
-                        <code className="px-1.5 py-0.5 rounded bg-zinc-950 text-emerald-400 font-bold">
+                        <code className="px-1.5 py-0.5 rounded bg-soft text-emerald-800 font-bold">
                           {selectedSession.payment_code}
                         </code>{' '}
                         chưa. Khi bấm xác nhận, đơn sẽ lập tức chuyển sang{' '}
-                        <strong>ACTIVE</strong> và hiện lên màn hình Bếp!
+                        <strong>đang phục vụ</strong> và hiện lên màn hình Bếp!
                       </div>
 
                       <button
                         type="button"
                         disabled={isSubmitting}
                         onClick={handleConfirmTakeawayTransfer}
-                        className="min-h-12 w-full py-3 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg"
+                        className="min-h-12 w-full py-3 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-ink font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg"
                       >
                         <CheckCircle2 className="h-5 w-5" />
                         Xác nhận đã nhận chuyển khoản • Đẩy đơn vào Bếp (
@@ -664,7 +667,7 @@ export function BillsManager({
                   )}
 
                 {/* Danh sách món cho phép Admin hủy kèm lý do */}
-                <div className="divide-y divide-zinc-800 max-h-60 overflow-y-auto pr-1 text-sm">
+                <div className="divide-y divide-line max-h-60 overflow-y-auto pr-1 text-sm">
                   {selectedSessionOrders.map((item) => {
                     const menu = menuMap.get(item.menu_item_id);
                     return (
@@ -677,25 +680,25 @@ export function BillsManager({
                             className={cn(
                               'font-semibold',
                               item.status === 'CANCELLED'
-                                ? 'line-through text-zinc-500'
-                                : 'text-zinc-100'
+                                ? 'line-through text-muted-ink'
+                                : 'text-ink'
                             )}
                           >
                             {item.quantity}x {menu?.name ?? 'Món ăn'} (
                             {formatVND(item.unit_price)})
                           </span>
-                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                            {item.status}
+                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded bg-muted text-muted-ink">
+                            {orderStatusLabel[item.status]}
                           </span>
                           {item.cancel_reason && (
-                            <span className="block text-[11px] text-red-400">
+                            <span className="block text-[11px] text-red-800">
                               Lý do hủy: {item.cancel_reason}
                             </span>
                           )}
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-zinc-200">
+                          <span className="font-bold text-ink">
                             {formatVND(item.unit_price * item.quantity)}
                           </span>
                           {selectedSession.status !== 'CLOSED' &&
@@ -706,8 +709,8 @@ export function BillsManager({
                                   setCancellingOrderItem(item);
                                   setCancelReason('');
                                 }}
-                                title="Admin hủy món (Bắt buộc nhập lý do)"
-                                className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-300"
+                                title="Hủy món · Cần nhập lý do"
+                                className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-800"
                               >
                                 <Ban className="h-3.5 w-3.5" />
                               </button>
@@ -722,7 +725,7 @@ export function BillsManager({
                   type="button"
                   disabled={isSubmitting}
                   onClick={handlePrintAndCloseBill}
-                  className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg"
+                  className="min-h-12 w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg"
                 >
                   <Printer className="h-5 w-5" />
                   {selectedSession.status === 'CLOSED'
@@ -762,7 +765,7 @@ export function BillsManager({
                     </strong>
                   </div>
                   <div className="flex justify-between">
-                    <span>Mã bill:</span>
+                    <span>Mã hóa đơn:</span>
                     <span>{selectedSession.session_token}</span>
                   </div>
                   <div className="flex justify-between">
@@ -786,7 +789,7 @@ export function BillsManager({
                     <span>
                       {selectedSession.assigned_staff_id
                         ? staffMap.get(selectedSession.assigned_staff_id)
-                            ?.full_name ?? 'Admin'
+                            ?.full_name ?? 'Chủ quán'
                         : 'Chủ quán / Thu ngân'}
                     </span>
                   </div>
@@ -850,35 +853,35 @@ export function BillsManager({
 
       {/* Modal Admin hủy món (bắt buộc nhập cancel_reason theo Mục 7 RBAC) */}
       {cancellingOrderItem && (
-        <div className="print:hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-lg font-bold text-zinc-100">
-                Xác nhận Hủy món (Quyền Admin)
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-900/35 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-lg font-bold text-ink">
+                Xác nhận hủy món
               </h3>
               <button
                 type="button"
                 onClick={() => setCancellingOrderItem(null)}
-                className="text-zinc-400 hover:text-white"
+                className="text-muted-ink hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <form onSubmit={handleAdminCancelOrderItem} className="space-y-4">
-              <p className="text-xs text-zinc-300">
+              <p className="text-xs text-ink">
                 Món đang chọn:{' '}
                 <strong>
                   {cancellingOrderItem.quantity}x{' '}
                   {menuMap.get(cancellingOrderItem.menu_item_id)?.name ??
                     'Món ăn'}
                 </strong>{' '}
-                (Trạng thái: <code>{cancellingOrderItem.status}</code>)
+                (Trạng thái: <code>{orderStatusLabel[cancellingOrderItem.status]}</code>)
               </p>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1">
-                  Lý do hủy món (`cancel_reason` - Bắt buộc theo Mục 7 RBAC) *
+                <label className="block text-xs font-medium text-ink mb-1">
+                  Lý do hủy món *
                 </label>
                 <input
                   type="text"
@@ -886,7 +889,7 @@ export function BillsManager({
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   placeholder="VD: Bếp làm cháy món / Khách báo đợi quá 15 phút..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-sm text-zinc-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-soft border border-line text-sm text-ink"
                 />
               </div>
 
@@ -894,7 +897,7 @@ export function BillsManager({
                 <button
                   type="button"
                   onClick={() => setCancellingOrderItem(null)}
-                  className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-muted text-ink text-xs font-semibold"
                 >
                   Đóng
                 </button>

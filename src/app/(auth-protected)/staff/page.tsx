@@ -15,7 +15,6 @@ export default async function StaffPage() {
   }
 
   const [
-    zonesRes,
     tablesRes,
     sessionsRes,
     orderItemsRes,
@@ -23,10 +22,6 @@ export default async function StaffPage() {
     ingredientsRes,
     staffRes,
   ] = await Promise.all([
-    supabase
-      .from('zones')
-      .select('id, name, created_at')
-      .order('created_at', { ascending: true }),
     supabase
       .from('tables')
       .select('id, table_number, zone_id, status, current_session_id')
@@ -64,7 +59,6 @@ export default async function StaffPage() {
 
   return (
     <StaffDashboard
-      initialZones={zonesRes.data ?? []}
       initialTables={tablesRes.data ?? []}
       initialSessions={sessionsRes.data ?? []}
       initialOrderItems={orderItemsRes.data ?? []}

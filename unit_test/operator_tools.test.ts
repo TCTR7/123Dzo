@@ -42,9 +42,9 @@ describe('Operator handover tools', () => {
     expect((await POST(request('reset', 'XOA HOA DON TEST'))).status).toBe(500);
     expect(m.updateTables).not.toHaveBeenCalled();
   });
-  it('creates two zones, six tables and six menu items for an empty shop', async () => {
+  it('creates one hidden compatibility zone, six tables and six menu items for an empty shop', async () => {
     expect((await POST(request('seed'))).status).toBe(200);
-    expect(m.insertZones.mock.calls[0][0]).toHaveLength(2);
+    expect(m.insertZones.mock.calls[0][0]).toHaveLength(1);
     expect(m.insertTables.mock.calls[0][0]).toHaveLength(6);
     expect(m.insertMenu.mock.calls[0][0]).toHaveLength(6);
   });
